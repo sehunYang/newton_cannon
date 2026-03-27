@@ -1,0 +1,2089 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>뉴턴의 대포 — 궤도 시뮬레이터</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+
+  :root {
+    --bg:      #050a14;
+    --panel:   rgba(8,18,38,0.92);
+    --border:  rgba(80,160,255,0.16);
+    --border2: rgba(80,160,255,0.30);
+    --accent:  #3a8eff;
+    --accent2: #7ef0c8;
+    --warn:    #ffa040;
+    --text:    #c8daf4;
+    --dim:     #5a7aa0;
+    --dim2:    #3a5070;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text);
+         font-family:'Noto Sans KR',sans-serif;
+         overflow:hidden; width:100vw; height:100vh; }
+  #wrap { position:relative; width:100%; height:100%; }
+  canvas { display:block; width:100%; height:100%; }
+  .ui { position:absolute; inset:0; pointer-events:none; }
+
+  /* ── 타이틀 ── */
+  .title-bar {
+    position:absolute; top:22px; left:50%; transform:translateX(-50%);
+    text-align:center; white-space:nowrap;
+  }
+  .title-bar h1 {
+    font-family:'Space Mono',monospace; font-size:22px;
+    letter-spacing:0.34em; text-transform:uppercase;
+    color:var(--accent); opacity:0.92;
+    text-shadow: 0 0 24px rgba(58,142,255,0.35);
+  }
+  .title-bar p { font-size:13px; color:var(--dim); letter-spacing:0.2em; margin-top:5px; }
+
+  /* ── HUD ── */
+  .hud {
+    position:absolute; top:22px; right:22px;
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:14px; padding:16px 20px; min-width:230px;
+    backdrop-filter:blur(16px); box-shadow:0 4px 32px rgba(0,0,0,0.4);
+    transition: border-color 0.3s;
+  }
+  .hud.impact { border-color: rgba(255,80,40,0.5); }
+  .hud.orbit  { border-color: rgba(58,142,255,0.5); }
+  .hud.escape { border-color: rgba(126,240,200,0.5); }
+
+  .hud-title {
+    font-family:'Space Mono',monospace; font-size:11px;
+    letter-spacing:0.28em; color:var(--accent); text-transform:uppercase;
+    margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .hud-title::before { content:''; width:6px; height:6px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 8px var(--accent);
+    animation: pulse-dot 2s infinite; }
+  @keyframes pulse-dot {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:0.4; transform:scale(0.7); }
+  }
+  .hud-row { display:flex; justify-content:space-between; align-items:center; margin:6px 0; }
+  .hud-label { font-size:13px; color:var(--dim); }
+  .hud-value { font-family:'Space Mono',monospace; font-size:14px; color:var(--accent2); }
+
+  /* 궤도 유형 배지 */
+  .orbit-badge {
+    display:inline-block; font-family:'Space Mono',monospace; font-size:12px;
+    padding:3px 10px; border-radius:20px; font-weight:700;
+    letter-spacing:0.06em; transition: all 0.4s;
+  }
+  .orbit-badge.fall   { background:rgba(255,160,64,0.15); color:#ffa040; border:1px solid rgba(255,160,64,0.3); }
+  .orbit-badge.orbit2 { background:rgba(58,142,255,0.15); color:#3a8eff; border:1px solid rgba(58,142,255,0.3); }
+  .orbit-badge.escape2{ background:rgba(126,240,200,0.15);color:#7ef0c8; border:1px solid rgba(126,240,200,0.3);}
+  .orbit-badge.impact2{ background:rgba(255,80,40,0.15); color:#ff6040; border:1px solid rgba(255,80,40,0.3); }
+  .orbit-badge.idle   { background:rgba(90,122,160,0.1); color:#5a7aa0; border:1px solid rgba(90,122,160,0.2); }
+
+  /* 통계 섹션 */
+  #hud-stats { transition: all 0.3s; }
+  .stat-divider { border:none; border-top:1px solid var(--border); margin:10px 0 8px; }
+
+  /* ── 컨트롤 패널 ── */
+  .ctrl-panel {
+    position:absolute; bottom:22px; right:22px;
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:14px; padding:18px 20px; min-width:275px;
+    pointer-events:all; backdrop-filter:blur(16px);
+    box-shadow:0 4px 32px rgba(0,0,0,0.4);
+  }
+  .ctrl-title {
+    font-family:'Space Mono',monospace; font-size:11px;
+    letter-spacing:0.28em; color:var(--accent); text-transform:uppercase;
+    margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:8px;
+  }
+  .ctrl-row { margin-bottom:14px; }
+  .ctrl-label-row { display:flex; justify-content:space-between; margin-bottom:7px; align-items:center; }
+  .ctrl-label { font-size:13px; color:var(--dim); }
+  .ctrl-val   { font-family:'Space Mono',monospace; font-size:13px; color:var(--text); }
+
+  /* 슬라이더 — 구간별 색상 (JS로 배경 동적 설정) */
+  input[type=range] {
+    -webkit-appearance:none; width:100%; height:5px;
+    background:rgba(60,100,180,0.30); border-radius:3px; outline:none; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 10px rgba(58,142,255,0.7);
+    transition:transform 0.12s, box-shadow 0.12s; cursor:grab;
+  }
+  input[type=range]:active::-webkit-slider-thumb { cursor:grabbing; transform:scale(1.2); }
+  input[type=range]:hover::-webkit-slider-thumb  { transform:scale(1.15); }
+
+  /* 속도 마커 */
+  .speed-marker-wrap { position:relative; height:22px; margin-top:5px; }
+  .speed-tick {
+    position:absolute; top:0; transform:translateX(-50%);
+    font-family:'Space Mono',monospace; font-size:10px;
+    line-height:1.3; text-align:center; white-space:nowrap; pointer-events:none;
+  }
+
+  /* 시뮬레이션 속도 선택 */
+  .sim-speed-row {
+    display:flex; align-items:center; gap:6px; margin-top:2px;
+  }
+  .sim-speed-label { font-size:12px; color:var(--dim); flex-shrink:0; }
+  .speed-btn {
+    font-family:'Space Mono',monospace; font-size:11px;
+    padding:4px 10px; border-radius:6px; border:1px solid var(--border2);
+    background:rgba(20,40,80,0.5); color:var(--dim); cursor:pointer;
+    transition:all 0.15s; pointer-events:all; flex:1; text-align:center;
+  }
+  .speed-btn:hover   { color:var(--text); border-color:var(--accent); }
+  .speed-btn.active  { background:rgba(58,142,255,0.2); color:var(--accent);
+                       border-color:var(--accent); box-shadow:0 0 8px rgba(58,142,255,0.25); }
+
+  /* ── 버튼 그룹 ── */
+  .btn-group {
+    position:absolute; bottom:22px; left:22px;
+    display:flex; gap:12px; pointer-events:all;
+  }
+  .btn {
+    font-family:'Space Mono',monospace; font-size:13px;
+    letter-spacing:0.12em; padding:13px 26px; border-radius:10px;
+    border:none; cursor:pointer; text-transform:uppercase; transition:all 0.15s;
+  }
+  .btn-fire {
+    background:var(--accent); color:#fff;
+    box-shadow:0 0 20px rgba(58,142,255,0.5);
+    position:relative; overflow:hidden;
+  }
+  .btn-fire::after {
+    content:''; position:absolute; inset:0; border-radius:10px;
+    box-shadow:0 0 0 0 rgba(58,142,255,0.5);
+    animation: fire-pulse 2.2s infinite;
+  }
+  @keyframes fire-pulse {
+    0%   { box-shadow:0 0 0 0 rgba(58,142,255,0.55); }
+    60%  { box-shadow:0 0 0 10px rgba(58,142,255,0); }
+    100% { box-shadow:0 0 0 0 rgba(58,142,255,0); }
+  }
+  .btn-fire:hover { background:#5aaeff; box-shadow:0 0 30px rgba(58,142,255,0.8);
+                    transform:translateY(-2px); }
+  .btn-fire:active { transform:translateY(0); }
+  .btn-fire.launched { background:#2a6acc; animation:none; }
+
+  .btn-reset {
+    background:rgba(30,50,80,0.8); color:var(--dim);
+    border:1px solid var(--border);
+  }
+  .btn-reset:hover { color:var(--text); border-color:var(--accent); }
+
+  /* ── 체크박스 ── */
+  .check-group {
+    position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
+    display:flex; gap:20px; pointer-events:all;
+  }
+  .check-item {
+    display:flex; align-items:center; gap:8px; cursor:pointer;
+    font-size:13px; color:var(--dim); user-select:none; transition:color 0.15s;
+  }
+  .check-item:hover { color:var(--text); }
+  .check-item input { display:none; }
+  .check-box {
+    width:17px; height:17px; border:1.5px solid var(--border); border-radius:4px;
+    display:flex; align-items:center; justify-content:center;
+    transition:all 0.15s; flex-shrink:0;
+  }
+  .check-item input:checked + .check-box {
+    background:var(--accent); border-color:var(--accent);
+    box-shadow:0 0 8px rgba(58,142,255,0.5);
+  }
+  .check-box::after {
+    content:''; width:7px; height:5px;
+    border-left:2px solid #fff; border-bottom:2px solid #fff;
+    transform:rotate(-45deg) translateY(-1px); opacity:0; transition:opacity 0.1s;
+  }
+  .check-item input:checked + .check-box::after { opacity:1; }
+
+  /* ── 줌/속도 배지 (좌상단) ── */
+  .info-badge {
+    position:absolute; top:22px; left:22px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .badge-pill {
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:7px 14px; backdrop-filter:blur(12px);
+    display:flex; align-items:center; gap:10px;
+    box-shadow:0 2px 12px rgba(0,0,0,0.3);
+  }
+  .badge-pill span { font-family:'Space Mono',monospace; font-size:12px; color:var(--dim); }
+  .badge-pill b    { font-family:'Space Mono',monospace; font-size:13px; color:var(--accent); }
+
+  /* ── 단축키 힌트 (우하단 작은 글씨) ── */
+  .shortcut-hint {
+    position:absolute; bottom:22px; left:50%; transform:translateX(-50%);
+    pointer-events:none; margin-bottom:74px;
+  }
+  .shortcut-hint span {
+    font-family:'Space Mono',monospace; font-size:10px;
+    color:rgba(90,122,160,0.4); letter-spacing:0.1em;
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     모바일 반응형 레이아웃
+     ═══════════════════════════════════════════════════════ */
+
+  /* ── 공통: 슬라이더 터치 영역 확대 ── */
+  @media (pointer: coarse) {
+    input[type=range] { height: 6px; touch-action: pan-y; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 24px; height: 24px;
+      box-shadow: 0 0 0 8px rgba(58,142,255,0.12), 0 0 10px rgba(58,142,255,0.7);
+    }
+    .speed-btn { padding: 7px 10px; min-height: 36px; }
+    .btn { padding: 14px 26px; }
+    .check-item { gap: 10px; }
+    .check-box { width: 20px; height: 20px; }
+    input[type=range] { font-size: 16px; } /* iOS 줌 방지 */
+  }
+
+  /* ── 세로 모드 모바일 (≤ 767px) ── */
+  @media (max-width: 767px) and (min-height: 480px) {
+
+    /* 타이틀: 작게, 부제 숨김 */
+    .title-bar { top: 12px; }
+    .title-bar h1 { font-size: 15px; letter-spacing: 0.18em; }
+    .title-bar p { display: none; }
+
+    /* 좌상단 배지: 컴팩트 */
+    .info-badge { top: 12px; left: 12px; gap: 5px; }
+    .badge-pill { padding: 5px 10px; }
+    .badge-pill span, .badge-pill b { font-size: 11px; }
+
+    /* HUD: 우상단 컴팩트 */
+    .hud {
+      top: 12px; right: 12px;
+      min-width: 0;
+      width: clamp(160px, 46vw, 230px);
+      padding: 10px 12px;
+    }
+    .hud-title { font-size: 9px; margin-bottom: 8px; padding-bottom: 6px; gap: 6px; }
+    .hud-row { margin: 3px 0; }
+    .hud-label { font-size: 11px; }
+    .hud-value { font-size: 11px; }
+    .orbit-badge { font-size: 10px; padding: 2px 7px; }
+    #hud-stats { display: none !important; } /* 통계는 모바일 세로에서 숨김 */
+
+    /* 컨트롤 패널: 하단 전체 너비 */
+    .ctrl-panel {
+      bottom: 0; left: 0; right: 0;
+      min-width: 0;
+      border-radius: 16px 16px 0 0;
+      padding: 14px 18px;
+      padding-bottom: max(env(safe-area-inset-bottom, 14px), 14px);
+    }
+    .ctrl-title { font-size: 10px; margin-bottom: 10px; padding-bottom: 7px; }
+    .ctrl-row { margin-bottom: 10px; }
+    .ctrl-label-row { margin-bottom: 5px; }
+    .ctrl-label, .ctrl-val { font-size: 12px; }
+    .sim-speed-label { font-size: 11px; }
+    .speed-btn { font-size: 10px; padding: 6px 0; min-height: 32px; }
+    .speed-marker-wrap { height: 18px; margin-top: 4px; }
+    .speed-tick { font-size: 9px; }
+
+    /* 버튼 그룹: JS로 ctrl-panel 위에 동적 배치
+       (CSS에서 초기 safe-guard 위치 설정) */
+    .btn-group {
+      bottom: 240px;
+      left: 18px;
+      right: 18px;
+      gap: 10px;
+    }
+    .btn { flex: 1; padding: 12px 0; font-size: 12px; letter-spacing: 0.08em; }
+
+    /* 체크박스 그룹: JS로 btn-group 위에 배치 */
+    .check-group {
+      bottom: 300px;
+      left: 18px;
+      transform: none;
+      justify-content: flex-start;
+      gap: 18px;
+    }
+    .check-item { font-size: 12px; }
+    .check-box { width: 18px; height: 18px; }
+
+    /* 단축키 힌트: 모바일에서 숨김 */
+    .shortcut-hint { display: none; }
+  }
+
+  /* ── 소형 폰 (≤ 400px 너비) ── */
+  @media (max-width: 400px) and (min-height: 480px) {
+    .title-bar h1 { font-size: 13px; letter-spacing: 0.12em; }
+    .hud { width: clamp(150px, 50vw, 200px); padding: 8px 10px; }
+    .hud-title { font-size: 8px; }
+    .hud-label, .hud-value { font-size: 10px; }
+    .ctrl-panel { padding: 12px 14px; padding-bottom: max(env(safe-area-inset-bottom, 12px), 12px); }
+    .btn { font-size: 11px; }
+    .badge-pill span, .badge-pill b { font-size: 10px; }
+  }
+
+  /* ── 가로 모드 (높이 ≤ 500px) ── */
+  @media (max-height: 500px) {
+    .title-bar { top: 8px; }
+    .title-bar h1 { font-size: 13px; letter-spacing: 0.14em; }
+    .title-bar p { display: none; }
+
+    .info-badge { top: 8px; left: 8px; gap: 4px; }
+    .badge-pill { padding: 4px 9px; }
+    .badge-pill span, .badge-pill b { font-size: 10px; }
+
+    .hud {
+      top: 8px; right: 8px;
+      min-width: 0;
+      width: 200px;
+      padding: 8px 12px;
+    }
+    .hud-title { font-size: 8px; margin-bottom: 6px; padding-bottom: 5px; }
+    .hud-row { margin: 2px 0; }
+    .hud-label, .hud-value { font-size: 10px; }
+    .orbit-badge { font-size: 9px; padding: 2px 6px; }
+    #hud-stats { display: none !important; }
+
+    .ctrl-panel {
+      bottom: 0; right: 0;
+      left: auto;
+      min-width: 250px;
+      max-width: min(320px, 38vw);
+      border-radius: 12px 0 0 0;
+      padding: 10px 14px;
+      padding-bottom: max(env(safe-area-inset-bottom, 10px), 10px);
+      max-height: 100dvh;
+      overflow-y: auto;
+    }
+    .ctrl-title { font-size: 9px; margin-bottom: 8px; padding-bottom: 5px; }
+    .ctrl-row { margin-bottom: 8px; }
+    .ctrl-label, .ctrl-val { font-size: 11px; }
+    .sim-speed-label { font-size: 10px; }
+    .speed-btn { font-size: 9px; padding: 4px 0; }
+    .speed-marker-wrap { height: 16px; margin-top: 3px; }
+    .speed-tick { font-size: 8px; }
+
+    .btn-group { bottom: 12px; left: 12px; gap: 8px; }
+    .btn { padding: 10px 18px; font-size: 11px; }
+
+    .check-group {
+      bottom: 18px;
+      margin-bottom: 52px;
+      gap: 14px;
+    }
+    .check-item { font-size: 11px; }
+
+    .shortcut-hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="ui">
+
+    <!-- 타이틀 -->
+    <div class="title-bar">
+      <h1>Newton's Cannon</h1>
+      <p>궤도 역학 시뮬레이터</p>
+    </div>
+
+    <!-- HUD (우상단) -->
+    <div class="hud" id="hud-panel">
+      <div class="hud-title">Telemetry</div>
+      <div class="hud-row">
+        <span class="hud-label">속력</span>
+        <span class="hud-value" id="hud-spd">— m/s</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">고도</span>
+        <span class="hud-value" id="hud-alt">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">경과</span>
+        <span class="hud-value" id="hud-t">0.0 s</span>
+      </div>
+      <div class="hud-row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+        <span class="hud-label">궤도</span>
+        <span class="orbit-badge idle" id="hud-orbit">대기 중</span>
+      </div>
+      <div id="hud-stats" style="display:none">
+        <hr class="stat-divider">
+        <div class="hud-row">
+          <span class="hud-label">최고고도</span>
+          <span class="hud-value" id="hud-maxalt">—</span>
+        </div>
+        <div class="hud-row" id="hud-impact-row" style="display:none">
+          <span class="hud-label">착탄각</span>
+          <span class="hud-value" id="hud-impang">—</span>
+        </div>
+        <div class="hud-row" id="hud-dist-row" style="display:none">
+          <span class="hud-label">비행거리</span>
+          <span class="hud-value" id="hud-dist">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 좌상단 배지 -->
+    <div class="info-badge">
+      <div class="badge-pill">
+        <span>줌</span><b id="zoom-val">1.00×</b>
+      </div>
+      <div class="badge-pill" id="simspd-badge" style="display:none">
+        <span>시뮬</span><b id="simspd-val">×8</b>
+      </div>
+    </div>
+
+    <!-- 컨트롤 패널 (우하단) -->
+    <div class="ctrl-panel">
+      <div class="ctrl-title">Launch Config</div>
+
+      <!-- 발사각 슬라이더 -->
+      <div class="ctrl-row">
+        <div class="ctrl-label-row">
+          <span class="ctrl-label">발사각</span>
+          <span class="ctrl-val" id="v-ang">0°</span>
+        </div>
+        <input type="range" id="s-ang" min="-10" max="90" value="0" step="1">
+      </div>
+
+      <!-- 초기속도 슬라이더 -->
+      <div class="ctrl-row" style="margin-bottom:4px">
+        <div class="ctrl-label-row">
+          <span class="ctrl-label">초기속도</span>
+          <span class="ctrl-val" id="v-spd">4.0 km/s</span>
+        </div>
+        <input type="range" id="s-spd" min="0" max="12000" value="4000" step="100">
+        <div class="speed-marker-wrap">
+          <div id="marker-v1" class="speed-tick" style="color:rgba(58,142,255,0.75)">▲<br>원궤도</div>
+          <div id="marker-v2" class="speed-tick" style="color:rgba(126,240,200,0.75)">▲<br>탈출</div>
+        </div>
+      </div>
+
+      <!-- 시뮬레이션 속도 -->
+      <div class="ctrl-row" style="margin-bottom:0">
+        <div class="sim-speed-row">
+          <span class="sim-speed-label">시뮬속도</span>
+          <button class="speed-btn" data-mult="1">×1</button>
+          <button class="speed-btn active" data-mult="8">×8</button>
+          <button class="speed-btn" data-mult="32">×32</button>
+          <button class="speed-btn" data-mult="128">×128</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 발사/리셋 버튼 (좌하단) -->
+    <div class="btn-group">
+      <button class="btn btn-fire" id="btn-fire">🚀 발사</button>
+      <button class="btn btn-reset" id="btn-reset">↺ 리셋</button>
+    </div>
+
+    <!-- 체크박스 + 단축키 힌트 -->
+    <div class="check-group">
+      <label class="check-item">
+        <input type="checkbox" id="chk-trail" checked>
+        <span class="check-box"></span>궤적 표시
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-grid">
+        <span class="check-box"></span>격자 표시
+      </label>
+    </div>
+
+    <div class="shortcut-hint">
+      <span>Space: 발사 / R: 리셋 / G: 격자 / 1·2·3·4: 시뮬속도</span>
+    </div>
+
+  </div><!-- /.ui -->
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  뉴턴의 대포 — 단계 1~5 완성
+//  단계 4: 궤적 기록 및 렌더링 (밀도 적응형, 속도 색상, 마커)
+//  단계 5: 충돌/이탈 판정 + HUD 통계 갱신
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+// ── UI refs ──
+const sAng = document.getElementById('s-ang');
+const sSpd = document.getElementById('s-spd');
+const vAng = document.getElementById('v-ang');
+const vSpd = document.getElementById('v-spd');
+
+// ── 앱 상태 ──
+let angleDeg  = 0;     // 발사각 (도)
+let initSpeed = 4000;  // 초기속도 (m/s)
+let showTrail = true;
+let showGrid  = false;
+
+// ── 물리 상수 ──
+const G       = 6.674e-11;
+const M_EARTH = 5.972e24;
+const R_EARTH = 6.371e6;
+const H_MOUNT = 8848;
+const GM      = G * M_EARTH;
+const V1      = Math.sqrt(GM / (R_EARTH + H_MOUNT));  // 발사 고도 기준 원궤도 속도 ≈7905 m/s
+const V2      = V1 * Math.sqrt(2);                     // 탈출 속도 ≈11186 m/s
+
+// ── 시뮬레이션 ──
+let sim = {
+  active: false,
+  pos: {x:0,y:0}, vel: {x:0,y:0}, acc: {x:0,y:0},
+  trail: [],      // {x,y,spd,alt} — 위치+속도+고도 기록
+  elapsed: 0,
+  done: false,
+  result: '',     // 'impact' | 'escape'
+  // 단계 5: 충돌·이탈 분석 데이터
+  stats: {
+    maxAlt: 0,           // 최고 고도 (m)
+    maxAltPos: null,     // 최고 고도 위치
+    impactAngle: 0,      // 착탄각 (°, 지표면 기준)
+    impactPos: null,     // 착탄 지점 월드 좌표
+    flightDist: 0,       // 비행 거리 (지표면 호 길이, m)
+    escapeDir: 0,        // 탈출 방향 각도 (rad)
+  }
+};
+const DT = 2;
+const STEPS_PER_FRAME = 8;
+
+// ═══════════════════════════════════════════════════════════════
+//  뷰 / 줌 시스템
+//
+//  zoom.current : 현재 적용 중인 줌 (지수 보간)
+//  zoom.target  : 목표 줌
+//
+//  줌 정의: 1.0 = 기본 크기, 0.x = 지구 작게(전체 시야 넓게)
+//
+//  R_SURFACE_PX : 지구 표면 화면 반경 (px)
+//  R_MOUNT_PX   : 에베레스트 꼭대기 화면 반경 (px)
+//  SURFACE_SCALE: 에베레스트 고도를 몇 배 확대해 표현할지
+// ═══════════════════════════════════════════════════════════════
+
+const SURFACE_SCALE = 8;   // 지표면 근처 확대 배율
+
+let VIEW = { ox:0, oy:0, baseR:0 };  // baseR: 줌=1일 때 지구 표면 반경(px)
+let R_SURFACE_PX = 0;
+let R_MOUNT_PX   = 0;
+
+let zoom = { current: 1.0, target: 1.0 };
+
+// 발사속도 → 권장 줌 (발사 전 미리보기 + 비행 중 기준선)
+function speedToZoom(v) {
+  if (v <= 4000)  return 1.0;
+  if (v <= V1)    return 1.0;
+  if (v <= V2)    return 0.55 - 0.20 * ((v - V1) / (V2 - V1));
+  return 0.30;
+}
+
+// 포탄 고도 → 필요 줌
+function altToZoom(r) {
+  const alt = r - R_EARTH;
+  if (alt <= H_MOUNT * 3)    return 1.00;
+  if (alt <= R_EARTH * 0.3)  return 0.88;
+  if (alt <= R_EARTH * 0.8)  return 0.72;
+  if (alt <= R_EARTH * 1.5)  return 0.58;
+  if (alt <= R_EARTH * 3)    return 0.44;
+  return 0.32;
+}
+
+// 매 프레임 줌 업데이트 (부드러운 지수 보간)
+function updateZoom() {
+  if (!sim.active && !sim.done) {
+    zoom.target = speedToZoom(initSpeed);
+  } else if (sim.active) {
+    const r = Math.sqrt(sim.pos.x**2 + sim.pos.y**2);
+    // 속도 기반과 위치 기반 중 더 넓은 시야(더 작은 줌) 선택
+    zoom.target = Math.min(speedToZoom(initSpeed), altToZoom(r));
+  }
+  // 축소는 빠르게(0.07), 복귀는 느리게(0.02)
+  const k = zoom.current > zoom.target ? 0.07 : 0.02;
+  zoom.current += (zoom.target - zoom.current) * k;
+  if (Math.abs(zoom.current - zoom.target) < 0.0005) zoom.current = zoom.target;
+
+  // 파생 값 재계산
+  R_SURFACE_PX = VIEW.baseR * zoom.current;
+  R_MOUNT_PX   = R_SURFACE_PX + (H_MOUNT / R_EARTH) * VIEW.baseR * SURFACE_SCALE * zoom.current;
+
+  // 줌 표시기 갱신
+  document.getElementById('zoom-val').textContent = zoom.current.toFixed(2) + '×';
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = canvas.clientWidth  * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  VIEW.ox    = W / 2;
+  VIEW.oy    = H / 2;
+  VIEW.baseR = Math.min(W,H) * 0.25;   // 줌=1일 때 지구 반경 (px) = 화면 25%
+  // 슬라이더 참고 마커 위치 설정
+  positionSpeedMarkers();
+  // 모바일 동적 레이아웃 업데이트
+  updateMobileLayout();
+}
+window.addEventListener('resize', resize);
+
+// ── 속도 슬라이더 마커 (V1, V2 위치 표시) ──
+function positionSpeedMarkers() {
+  const slider = sSpd;
+  const min = 0, max = 12000;
+  const r1 = (V1 - min) / (max - min) * 100;
+  const r2 = (V2 - min) / (max - min) * 100;
+  document.getElementById('marker-v1').style.left = r1 + '%';
+  document.getElementById('marker-v2').style.left = r2 + '%';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  좌표 변환
+//  ① 지구 내부~에베레스트: 선형 확대 (SURFACE_SCALE배)
+//  ② 에베레스트 위 우주: 로그 압축
+//  두 구간은 에베레스트 꼭대기에서 연속
+// ═══════════════════════════════════════════════════════════════
+
+function rToScreen(rWorld) {
+  const rMount = R_EARTH + H_MOUNT;
+  if (rWorld <= rMount) {
+    const t = Math.max(0, (rWorld - R_EARTH) / H_MOUNT);
+    return R_SURFACE_PX + t * (R_MOUNT_PX - R_SURFACE_PX);
+  }
+  // 로그 구간: R_EARTH*10 이 화면 80% 가장자리에 오도록 k 결정
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const maxPx = Math.max(W, H) * 0.80;
+  const k = (maxPx - R_MOUNT_PX) / Math.log(R_EARTH * 10 / rMount);
+  return R_MOUNT_PX + k * Math.log(rWorld / rMount);
+}
+
+function worldToScreen(wx, wy) {
+  const r = Math.sqrt(wx*wx + wy*wy);
+  if (r < 1) return { x: VIEW.ox, y: VIEW.oy };
+  const rPx = rToScreen(r);
+  return {
+    x: VIEW.ox + (wx / r) * rPx,
+    y: VIEW.oy - (wy / r) * rPx,  // y 반전
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  별 배경
+// ═══════════════════════════════════════════════════════════════
+const STARS = [];
+(() => {
+  for (let i = 0; i < 320; i++) STARS.push({
+    x: Math.random(), y: Math.random(),
+    r: Math.random()*1.2+0.2, a: Math.random()*0.55+0.25
+  });
+})();
+
+function drawStars() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  for (const s of STARS) {
+    ctx.beginPath();
+    ctx.arc(s.x*W, s.y*H, s.r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(200,220,255,${s.a})`;
+    ctx.fill();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  격자 (동심원 + 방사선)
+// ═══════════════════════════════════════════════════════════════
+function drawGrid() {
+  if (!showGrid) return;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const cx = VIEW.ox, cy = VIEW.oy;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(58,142,255,0.08)';
+  ctx.lineWidth = 1;
+  // 동심원: Re 단위
+  for (const f of [0.5, 1, 2, 3, 5, 7, 10]) {
+    const rPx = rToScreen(R_EARTH * f);
+    if (rPx < 2 || rPx > Math.max(W,H)*1.5) continue;
+    ctx.beginPath(); ctx.arc(cx, cy, rPx, 0, Math.PI*2); ctx.stroke();
+    // 레이블
+    ctx.save();
+    ctx.fillStyle = 'rgba(58,142,255,0.4)';
+    ctx.font = '11px "Space Mono",monospace';
+    const lx = cx + rPx * Math.cos(-Math.PI/5) + 4;
+    const ly = cy + rPx * Math.sin(-Math.PI/5) - 3;
+    ctx.fillText(f + ' Re', lx, ly);
+    ctx.restore();
+  }
+  // 방사선
+  for (let a = 0; a < Math.PI*2; a += Math.PI/8) {
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a)*Math.max(W,H)*1.3, cy + Math.sin(a)*Math.max(W,H)*1.3);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  지구
+// ═══════════════════════════════════════════════════════════════
+const CONTINENTS = [
+  // 아프리카
+  [[-17,15],[-12,14],[-5,8],[0,5],[2,5],[9,4],[10,1],[9,-1],[11,-3],
+   [12,-6],[12,-10],[14,-14],[16,-22],[17,-29],[20,-35],[25,-34],[30,-31],
+   [35,-24],[40,-20],[41,-15],[43,-12],[44,-8],[42,-2],[40,4],[36,8],
+   [32,11],[30,11],[28,12],[24,12],[21,11],[15,12],[11,12],[7,9],[2,6],
+   [-1,6],[-5,5],[-8,5],[-15,10],[-17,15]],
+  // 유럽
+  [[-9,44],[-8,39],[-7,37],[0,36],[5,36],[9,37],[12,38],[15,37],[18,40],
+   [22,40],[24,38],[26,39],[28,41],[30,43],[28,45],[25,46],[23,48],
+   [20,49],[18,50],[14,54],[10,56],[8,57],[5,57],[4,52],[3,50],[2,47],
+   [-1,44],[-3,44],[-5,44],[-7,44],[-9,44]],
+  // 아시아
+  [[30,44],[35,42],[40,40],[45,38],[50,38],[55,40],[60,38],[65,38],
+   [70,35],[75,32],[80,30],[85,28],[90,25],[95,22],[100,20],[105,20],
+   [110,20],[115,22],[120,24],[125,26],[130,28],[135,34],[138,36],
+   [140,38],[142,45],[135,48],[130,52],[125,55],[120,58],[115,60],
+   [110,60],[105,55],[100,55],[95,52],[90,52],[85,56],[80,60],[75,60],
+   [70,65],[65,68],[55,68],[50,60],[45,55],[40,55],[35,50],[30,48],[30,44]],
+  // 북아메리카
+  [[-60,47],[-65,44],[-66,40],[-75,38],[-75,35],[-80,32],[-82,30],
+   [-85,30],[-90,28],[-95,26],[-100,24],[-105,23],[-110,24],[-115,25],
+   [-118,28],[-120,30],[-122,36],[-124,40],[-124,48],[-122,50],
+   [-120,54],[-125,58],[-130,55],[-138,60],[-140,60],[-145,62],
+   [-140,65],[-135,68],[-130,70],[-120,72],[-110,70],[-100,68],
+   [-90,68],[-80,65],[-75,63],[-70,60],[-65,50],[-60,47]],
+  // 남아메리카
+  [[-35,-5],[-38,-5],[-44,-4],[-50,-2],[-55,2],[-60,4],[-65,2],[-72,-2],
+   [-76,-6],[-78,-10],[-80,-16],[-80,-22],[-72,-28],[-68,-36],[-65,-42],
+   [-62,-48],[-66,-52],[-68,-54],[-64,-54],[-60,-50],[-55,-46],
+   [-50,-40],[-45,-35],[-40,-28],[-38,-20],[-35,-14],[-35,-8],[-35,-5]],
+  // 호주
+  [[114,-22],[116,-20],[118,-18],[122,-18],[128,-16],[132,-14],[136,-14],
+   [140,-18],[144,-20],[148,-22],[152,-24],[154,-26],[154,-30],[152,-36],
+   [148,-38],[144,-38],[140,-36],[136,-36],[132,-34],[128,-32],[124,-28],
+   [120,-26],[116,-24],[114,-22]],
+  // 남극
+  [[-180,-70],[-120,-68],[-60,-68],[0,-70],[60,-68],[120,-66],[180,-70],
+   [180,-90],[-180,-90],[-180,-70]],
+  // 그린란드
+  [[-20,83],[-30,83],[-42,80],[-52,78],[-58,76],[-60,72],[-58,68],
+   [-52,66],[-46,66],[-42,68],[-35,68],[-25,70],[-18,74],[-16,78],[-18,82],[-20,83]],
+];
+
+const ROT_DEG = 30; // 아시아가 잘 보이도록 동향 오프셋
+
+function lonLatToXY(lon, lat, cx, cy, R) {
+  const lonR = (lon + ROT_DEG) * Math.PI / 180;
+  const latR = lat * Math.PI / 180;
+  return {
+    x: cx + Math.cos(latR) * Math.sin(lonR) * R,
+    y: cy - Math.sin(latR) * R,
+  };
+}
+
+function drawContinents(cx, cy, R) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.clip();
+  for (const cont of CONTINENTS) {
+    ctx.beginPath();
+    const p0 = lonLatToXY(cont[0][0], cont[0][1], cx, cy, R);
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < cont.length; i++) {
+      const p = lonLatToXY(cont[i][0], cont[i][1], cx, cy, R);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(50,100,45,0.75)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(80,140,70,0.4)';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawEarth() {
+  const cx = VIEW.ox, cy = VIEW.oy, R = R_SURFACE_PX;
+  // 대기 글로우
+  const atm = ctx.createRadialGradient(cx,cy,R*0.95,cx,cy,R*1.22);
+  atm.addColorStop(0,'rgba(60,140,255,0.28)');
+  atm.addColorStop(0.5,'rgba(40,100,200,0.09)');
+  atm.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,R*1.22,0,Math.PI*2);
+  ctx.fillStyle=atm; ctx.fill();
+  // 바다
+  const eg = ctx.createRadialGradient(cx-R*0.25,cy-R*0.25,R*0.04,cx,cy,R);
+  eg.addColorStop(0,'#4484d8'); eg.addColorStop(0.45,'#2456aa');
+  eg.addColorStop(0.85,'#1a3a6e'); eg.addColorStop(1,'#0f2244');
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fillStyle=eg; ctx.fill();
+  // 대륙
+  drawContinents(cx, cy, R);
+  // 경계선
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+  ctx.strokeStyle='rgba(80,160,255,0.38)'; ctx.lineWidth=1.5; ctx.stroke();
+  // 하이라이트
+  const hl = ctx.createRadialGradient(cx-R*0.3,cy-R*0.35,0,cx-R*0.1,cy-R*0.1,R*0.85);
+  hl.addColorStop(0,'rgba(180,220,255,0.14)'); hl.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fillStyle=hl; ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  카메라 추적 시스템
+//  발사 전: 지구 중심 고정
+//  발사 후: 포탄 위치를 화면 중심으로 부드럽게 추적
+// ═══════════════════════════════════════════════════════════════
+let CAM = {
+  targetOx: 0,   // 목표 화면 원점 (지구 중심의 화면 좌표)
+  targetOy: 0,
+  smoothOx: 0,
+  smoothOy: 0,
+  tracking: false,   // 포탄 추적 모드
+};
+
+function updateCamera() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const baseOx = W / 2, baseOy = H / 2;
+
+  if (sim.active && sim.trail.length > 0) {
+    CAM.tracking = true;
+    // 포탄 위치를 화면 중앙에 오게 하려면, 지구 중심을 반대 방향으로 옮겨야 함
+    const pos   = sim.pos;
+    const r     = Math.sqrt(pos.x**2 + pos.y**2);
+    const rPx   = rToScreen(r);
+    const nx    = pos.x / r, ny = pos.y / r;
+    // 포탄이 화면 중앙에 오도록 VIEW.ox,oy 조정
+    // ballScreenX = VIEW.ox + nx*rPx = W/2 → VIEW.ox = W/2 - nx*rPx
+    const desiredOx = baseOx - nx * rPx;
+    const desiredOy = baseOy + ny * rPx;  // y 반전
+
+    // 단, 지구가 너무 화면 밖으로 나가지 않도록 제한
+    const margin = R_SURFACE_PX * 0.5;
+    CAM.targetOx = Math.max(-W * 0.4, Math.min(W * 1.4, desiredOx));
+    CAM.targetOy = Math.max(-H * 0.4, Math.min(H * 1.4, desiredOy));
+  } else {
+    CAM.tracking = false;
+    CAM.targetOx = baseOx;
+    CAM.targetOy = baseOy;
+  }
+
+  // 부드러운 보간
+  const k = CAM.tracking ? 0.05 : 0.08;
+  CAM.smoothOx += (CAM.targetOx - CAM.smoothOx) * k;
+  CAM.smoothOy += (CAM.targetOy - CAM.smoothOy) * k;
+
+  if (!sim.active && !sim.done) {
+    // 발사 전·리셋 후에는 즉시 중앙으로
+    CAM.smoothOx = baseOx;
+    CAM.smoothOy = baseOy;
+  }
+
+  VIEW.ox = CAM.smoothOx;
+  VIEW.oy = CAM.smoothOy;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  에베레스트 + 대포
+//  단계 3 핵심: angleDeg 슬라이더 → 대포 실시간 회전 + 조준 UI
+// ═══════════════════════════════════════════════════════════════
+const BASE_ANGLE = -Math.PI / 2;  // 12시 방향 (지구 북극)
+
+function drawMountainAndCannon() {
+  const cx = VIEW.ox, cy = VIEW.oy;
+  const R   = R_SURFACE_PX;
+  const RMt = R_MOUNT_PX;
+
+  // ① 조준 UI (발사 전에만)
+  if (!sim.active && !sim.done) drawAimUI(cx, cy, R, RMt);
+
+  // ② 산
+  drawMountain(cx, cy, R, RMt);
+
+  // ③ 대포 (슬라이더 각도 실시간 반영)
+  drawCannon(cx, cy, R, RMt);
+}
+
+// ── 조준 UI: 각도 호 + 점선 조준선 + 거리 링 ──
+function drawAimUI(cx, cy, R, RMt) {
+  const pivotX = cx + Math.cos(BASE_ANGLE) * RMt;
+  const pivotY = cy + Math.sin(BASE_ANGLE) * RMt;
+
+  const horizAngle = BASE_ANGLE + Math.PI / 2;   // 지평선 방향 (오른쪽)
+  const fireAngle  = horizAngle - angleDeg * Math.PI / 180;  // 실제 발사 방향
+
+  // ── 거리 링 (지구 표면 + 에베레스트 경계) ──
+  ctx.save();
+  ctx.setLineDash([4, 8]);
+  ctx.strokeStyle = 'rgba(58,142,255,0.12)';
+  ctx.lineWidth = 1;
+  // 에베레스트 반경 링
+  ctx.beginPath();
+  ctx.arc(cx, cy, RMt, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── 조준선 (점선, 포구 → 원거리) ──
+  const aimLen = Math.max(canvas.clientWidth, canvas.clientHeight) * 0.7;
+  ctx.save();
+  ctx.setLineDash([8, 10]);
+  ctx.beginPath();
+  ctx.moveTo(pivotX, pivotY);
+  ctx.lineTo(pivotX + Math.cos(fireAngle) * aimLen, pivotY + Math.sin(fireAngle) * aimLen);
+  ctx.strokeStyle = 'rgba(58,142,255,0.30)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── 각도 호 + 각도 레이블 ──
+  const arcR = Math.max(30, RMt * 0.55);   // 호 반지름
+  ctx.save();
+  ctx.translate(pivotX, pivotY);
+
+  // 지평선 기준선 (희미하게)
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(Math.cos(horizAngle) * arcR * 1.15, Math.sin(horizAngle) * arcR * 1.15);
+  ctx.strokeStyle = 'rgba(58,142,255,0.18)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  if (Math.abs(angleDeg) > 0.5) {
+    // 호 채우기
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    // 호: horizAngle → fireAngle (angleDeg > 0이면 위쪽, 즉 캔버스 y감소 방향)
+    const startA = horizAngle;
+    const endA   = fireAngle;
+    ctx.arc(0, 0, arcR, Math.min(startA, endA), Math.max(startA, endA));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(58,142,255,0.07)';
+    ctx.fill();
+
+    // 호 테두리
+    ctx.beginPath();
+    ctx.arc(0, 0, arcR,
+      angleDeg >= 0 ? fireAngle : horizAngle,
+      angleDeg >= 0 ? horizAngle : fireAngle
+    );
+    ctx.strokeStyle = 'rgba(58,142,255,0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // 각도 레이블
+    const midA  = (horizAngle + fireAngle) / 2;
+    const lblR  = arcR + 16;
+    const lblX  = Math.cos(midA) * lblR;
+    const lblY  = Math.sin(midA) * lblR;
+    ctx.font = 'bold 13px "Space Mono",monospace';
+    ctx.fillStyle = 'rgba(126,240,200,0.85)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(angleDeg + '°', lblX, lblY);
+  }
+
+  // 포구 점 (pivot 표시)
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(58,142,255,0.7)';
+  ctx.fill();
+
+  ctx.restore();
+
+  // ── 발사각 0° 레이블 (지평선) ──
+  const lx = pivotX + Math.cos(horizAngle) * (arcR * 1.2 + 10);
+  const ly = pivotY + Math.sin(horizAngle) * (arcR * 1.2 + 10);
+  ctx.save();
+  ctx.font = '11px "Space Mono",monospace';
+  ctx.fillStyle = 'rgba(90,122,160,0.6)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('0°', lx, ly);
+  ctx.restore();
+}
+
+function drawMountain(cx, cy, R, RMt) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  // 캔버스 좌표에서 12시 방향이 -Y → 회전 없이 y에 -R, -RMt 사용
+  // baseAngle = -π/2 → rotate(0) 기준으로 위쪽이 -y
+  ctx.rotate(BASE_ANGLE + Math.PI/2);  // 로컬 -y가 12시 방향
+
+  const mW    = Math.max(10, R * 0.085);
+  const snowH = (RMt - R) * 0.32;
+
+  // 산 몸체
+  ctx.beginPath();
+  ctx.moveTo(-mW*2.0, -R);
+  ctx.lineTo(-mW*0.7, -(R + (RMt-R)*0.6));
+  ctx.lineTo(0,        -RMt);
+  ctx.lineTo( mW*0.7, -(R + (RMt-R)*0.6));
+  ctx.lineTo( mW*2.0, -R);
+  ctx.closePath();
+  const mg = ctx.createLinearGradient(0,-RMt,0,-R);
+  mg.addColorStop(0,'#4a7040'); mg.addColorStop(0.4,'#385830'); mg.addColorStop(1,'#223018');
+  ctx.fillStyle=mg; ctx.fill();
+
+  // 암벽 음영
+  ctx.beginPath();
+  ctx.moveTo(-mW*0.7,-(R+(RMt-R)*0.6)); ctx.lineTo(0,-RMt); ctx.lineTo(mW*0.7,-(R+(RMt-R)*0.6));
+  ctx.closePath(); ctx.fillStyle='rgba(20,30,20,0.35)'; ctx.fill();
+
+  // 눈
+  ctx.beginPath();
+  ctx.moveTo(-mW*0.55,-(RMt-snowH)); ctx.lineTo(0,-RMt); ctx.lineTo(mW*0.55,-(RMt-snowH));
+  ctx.closePath(); ctx.fillStyle='rgba(228,240,255,0.92)'; ctx.fill();
+
+  // 눈 음영
+  ctx.beginPath();
+  ctx.moveTo(0,-RMt); ctx.lineTo(mW*0.55,-(RMt-snowH)); ctx.lineTo(0,-(RMt-snowH*0.5));
+  ctx.closePath(); ctx.fillStyle='rgba(150,180,220,0.3)'; ctx.fill();
+
+  ctx.restore();
+}
+
+function drawCannon(cx, cy, R, RMt) {
+  // pivot: 산 꼭대기 화면 좌표
+  const pivotX = cx + Math.cos(BASE_ANGLE) * RMt;
+  const pivotY = cy + Math.sin(BASE_ANGLE) * RMt;
+
+  // 발사 방향 각도 (캔버스 좌표계)
+  //   BASE_ANGLE + π/2 = 지평선(오른쪽) 방향
+  //   angleDeg > 0: 위쪽 → 캔버스에서 음의 y = 빼야함
+  const fireAngle = (BASE_ANGLE + Math.PI/2) - angleDeg * Math.PI/180;
+
+  const barrelL = Math.max(16, R * 0.12);
+  const barrelW = Math.max(6,  R * 0.030);
+  const wheelR  = Math.max(5,  R * 0.024);
+
+  ctx.save();
+  ctx.translate(pivotX, pivotY);
+
+  // 받침 + 바퀴 (항상 지표면 접선 방향 = BASE_ANGLE + π/2)
+  ctx.save();
+  ctx.rotate(BASE_ANGLE + Math.PI/2);
+  const platW = barrelL*0.9, platH = barrelW*0.5;
+  ctx.beginPath();
+  ctx.roundRect(-platW*0.5, -platH, platW, platH, platH*0.3);
+  ctx.fillStyle='#243c58'; ctx.fill();
+  ctx.strokeStyle='rgba(100,180,255,0.22)'; ctx.lineWidth=0.9; ctx.stroke();
+
+  [-platW*0.28, platW*0.28].forEach(wx => {
+    ctx.beginPath(); ctx.arc(wx,0,wheelR,0,Math.PI*2);
+    ctx.fillStyle='#1a2d42'; ctx.fill();
+    ctx.strokeStyle='#4a80aa'; ctx.lineWidth=1.3; ctx.stroke();
+    for (let i = 0; i < 6; i++) {
+      const a = (i/6)*Math.PI*2;
+      ctx.beginPath(); ctx.moveTo(wx,0);
+      ctx.lineTo(wx+Math.cos(a)*wheelR*0.8, Math.sin(a)*wheelR*0.8);
+      ctx.strokeStyle='rgba(100,160,200,0.55)'; ctx.lineWidth=0.9; ctx.stroke();
+    }
+  });
+  ctx.restore();
+
+  // 포신 — fireAngle 방향으로 회전 + 반동 오프셋 (단계 6)
+  ctx.save();
+  ctx.rotate(fireAngle);
+  const recoilOff = getRecoilOffset();  // 반동: 음수 = 포구 반대 방향(포신 뒤로)
+  const bg = ctx.createLinearGradient(0,-barrelW*0.5,0,barrelW*0.5);
+  bg.addColorStop(0,'#9ac0e0'); bg.addColorStop(0.4,'#6090b8'); bg.addColorStop(1,'#2a4460');
+  ctx.beginPath(); ctx.roundRect(recoilOff,-barrelW*0.5,barrelL,barrelW,barrelW*0.35);
+  ctx.fillStyle=bg; ctx.fill();
+
+  ctx.beginPath(); ctx.arc(barrelL+recoilOff,0,barrelW*0.55,0,Math.PI*2);
+  ctx.fillStyle='#4a7898'; ctx.fill();
+  ctx.strokeStyle='#8abcdc'; ctx.lineWidth=1; ctx.stroke();
+
+  ctx.beginPath(); ctx.arc(barrelL+recoilOff,0,barrelW*0.28,0,Math.PI*2);
+  ctx.fillStyle='#08111e'; ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  단계 6: 발사 이펙트 파티클 시스템
+//  단계 7: 폭발 이펙트 + 경고 오버레이
+// ═══════════════════════════════════════════════════════════════
+
+// ── 파티클 풀 ──
+let particles = [];
+
+// 파티클 스폰 함수
+function spawnParticles(type, worldX, worldY, count, options = {}) {
+  const sp = worldToScreen(worldX, worldY);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = options.speed ? (options.minSpeed || 0.5) + Math.random() * options.speed : 1 + Math.random() * 3;
+    particles.push({
+      type,
+      x: sp.x + (Math.random() - 0.5) * (options.spread || 4),
+      y: sp.y + (Math.random() - 0.5) * (options.spread || 4),
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.0,
+      decay: options.decay || (0.015 + Math.random() * 0.025),
+      size: options.size ? options.minSize + Math.random() * options.size : 2 + Math.random() * 4,
+      color: options.color || null,
+      gravity: options.gravity || 0,
+      worldX, worldY,  // 월드 좌표 기록 (스크롤 시 보정용)
+    });
+  }
+}
+
+// ── 발사 이펙트 상태 ──
+let launchFx = {
+  active: false,
+  smokeTimer: 0,      // 연기 파티클 방출 남은 시간 (초)
+  recoilT: 0,         // 반동 애니메이션 진행도 0→1
+  recoilActive: false,
+};
+
+// 발사 이펙트 시작
+function triggerLaunchFx() {
+  launchFx.active      = true;
+  launchFx.smokeTimer  = 0.5;   // 0.5초간 연기 방출
+  launchFx.recoilT     = 0;
+  launchFx.recoilActive= true;
+
+  // 초기 발사 섬광 파티클 (불꽃)
+  const r0 = R_EARTH + H_MOUNT;
+  const horizAngle = BASE_ANGLE + Math.PI / 2;
+  const fireAngle  = horizAngle - angleDeg * Math.PI / 180;
+  // 포구 위치 (월드)
+  const barrelLm = 600000;  // 포신 길이 (m) — 화면 좌표로 환산 불필요, 방향만 사용
+  const muzzleWx = barrelLm * Math.cos(fireAngle);
+  const muzzleWy = -barrelLm * Math.sin(fireAngle) + r0;
+
+  spawnParticles('flash', muzzleWx, muzzleWy, 28, {
+    speed: 6, minSpeed: 2, spread: 8, decay: 0.06,
+    size: 5, minSize: 2,
+    color: null,  // flash는 자체 색상 사용
+  });
+  spawnParticles('smoke', 0, r0, 12, {
+    speed: 1.5, minSpeed: 0.3, spread: 6, decay: 0.008,
+    size: 10, minSize: 6,
+  });
+}
+
+// ── 폭발 이펙트 상태 ──
+let explosionFx = {
+  active: false,
+  timer: 0,           // 현재 시간
+  duration: 2.2,      // 총 지속 (초)
+  pos: {x:0, y:0},   // 착탄 월드 좌표
+  rings: [],          // 충격파 링 목록
+  overlayAlpha: 0,    // 화면 오버레이 투명도
+};
+
+// 폭발 이펙트 시작 (착탄 시)
+function triggerExplosionFx(worldX, worldY) {
+  explosionFx.active   = true;
+  explosionFx.timer    = 0;
+  explosionFx.pos      = { x: worldX, y: worldY };
+  explosionFx.overlayAlpha = 0;
+
+  // 중심 파티클 (빨강/주황/노랑 — 방사형)
+  spawnParticles('explosion', worldX, worldY, 55, {
+    speed: 9, minSpeed: 2, spread: 5, decay: 0.018,
+    size: 7, minSize: 3, gravity: 0.05,
+  });
+  // 파편 파티클 (더 빠르고 큼)
+  spawnParticles('debris', worldX, worldY, 20, {
+    speed: 5, minSpeed: 1, spread: 3, decay: 0.008,
+    size: 4, minSize: 2, gravity: 0.08,
+  });
+  // 충격파 링 초기화
+  explosionFx.rings = [
+    { r: 0, maxR: 60, speed: 3.5, alpha: 0.8 },
+    { r: 0, maxR: 100, speed: 2.2, alpha: 0.5 },
+    { r: 0, maxR: 160, speed: 1.4, alpha: 0.3 },
+  ];
+}
+
+// ── 파티클 업데이트 및 렌더 ──
+function updateAndDrawParticles(dt) {
+  ctx.save();
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x  += p.vx;
+    p.y  += p.vy;
+    p.vy += p.gravity || 0;
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+    const a = Math.max(0, p.life);
+
+    if (p.type === 'flash') {
+      // 발사 불꽃: 노랑→주황→빨강
+      const t  = 1 - p.life;
+      const pr = Math.round(255);
+      const pg = Math.round(220 * (1-t) + 80 * t);
+      const pb = Math.round(50 * (1-t));
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * a, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${pr},${pg},${pb},${a * 0.9})`;
+      ctx.fill();
+
+    } else if (p.type === 'smoke') {
+      // 연기: 회백색, 커지면서 사라짐
+      const sz = p.size * (1 + (1-p.life) * 2.5);
+      ctx.beginPath(); ctx.arc(p.x, p.y, sz, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(180,190,200,${a * 0.22})`;
+      ctx.fill();
+
+    } else if (p.type === 'explosion') {
+      // 폭발: 빨강/주황/노랑 랜덤
+      const hue = 10 + (1 - p.life) * 40;  // 10→50도 (빨강→노랑)
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * a * 1.2, 0, Math.PI*2);
+      ctx.fillStyle = `hsla(${hue},100%,60%,${a * 0.88})`;
+      ctx.fill();
+
+    } else if (p.type === 'debris') {
+      // 파편: 작은 사각형
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.life * 8);
+      ctx.fillStyle = `rgba(255,180,80,${a * 0.75})`;
+      ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// ── 발사 이펙트 업데이트 ──
+let _lastFxTime = 0;
+function updateLaunchFx(now) {
+  const dt = Math.min(0.05, (now - _lastFxTime) / 1000);
+  _lastFxTime = now;
+
+  // 연기 지속 방출
+  if (launchFx.active && launchFx.smokeTimer > 0) {
+    launchFx.smokeTimer -= dt;
+    // 매 프레임 연기 2~3개 추가
+    if (Math.random() < 0.85) {
+      const r0 = R_EARTH + H_MOUNT;
+      const horizAngle = BASE_ANGLE + Math.PI / 2;
+      const fireAngle  = horizAngle - angleDeg * Math.PI / 180;
+      // 포구 화면 좌표 (대략)
+      const mSp = worldToScreen(0, r0);
+      spawnParticles('smoke', 0, r0, 2, {
+        speed: 1.0, minSpeed: 0.2, spread: 10, decay: 0.006,
+        size: 14, minSize: 8,
+      });
+    }
+    if (launchFx.smokeTimer <= 0) launchFx.active = false;
+  }
+
+  // 반동 애니메이션
+  if (launchFx.recoilActive) {
+    launchFx.recoilT = Math.min(1, launchFx.recoilT + dt * 5);
+    if (launchFx.recoilT >= 1) launchFx.recoilActive = false;
+  }
+}
+
+// ── 폭발 이펙트 업데이트 ──
+function updateExplosionFx(now, dt) {
+  if (!explosionFx.active) return;
+  explosionFx.timer += dt;
+  const t = explosionFx.timer / explosionFx.duration;
+
+  // 충격파 링 확장
+  for (const ring of explosionFx.rings) {
+    ring.r = Math.min(ring.maxR, ring.r + ring.speed);
+  }
+
+  // 오버레이: 0→peak(0.35)→0
+  explosionFx.overlayAlpha = t < 0.15
+    ? (t / 0.15) * 0.35
+    : Math.max(0, 0.35 * (1 - (t - 0.15) / 0.85));
+
+  if (explosionFx.timer >= explosionFx.duration) {
+    explosionFx.active = false;
+    explosionFx.overlayAlpha = 0;
+  }
+}
+
+// ── 폭발 충격파 링 + 오버레이 렌더 ──
+function drawExplosionFx() {
+  if (!explosionFx.active) return;
+  const sp = worldToScreen(explosionFx.pos.x, explosionFx.pos.y);
+  const t  = explosionFx.timer / explosionFx.duration;
+  const W  = canvas.clientWidth, H = canvas.clientHeight;
+
+  // 충격파 링
+  ctx.save();
+  for (const ring of explosionFx.rings) {
+    if (ring.r <= 0) continue;
+    const a = ring.alpha * Math.max(0, 1 - ring.r / ring.maxR);
+    ctx.beginPath(); ctx.arc(sp.x, sp.y, ring.r, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(255,140,40,${a})`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 화면 전체 빨간 플래시 오버레이
+  if (explosionFx.overlayAlpha > 0.005) {
+    ctx.save();
+    ctx.fillStyle = `rgba(200,40,20,${explosionFx.overlayAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // 경고 텍스트 (duration의 10%~75% 구간)
+  const showText = t > 0.05 && t < 0.75;
+  if (showText) {
+    const textAlpha = t < 0.15 ? (t-0.05)/0.1
+                    : t > 0.60 ? 1 - (t-0.60)/0.15
+                    : 1.0;
+    ctx.save();
+    // 그림자 효과
+    ctx.shadowColor = 'rgba(255,60,20,0.8)';
+    ctx.shadowBlur  = 24;
+    ctx.font        = `bold ${Math.round(W * 0.032)}px 'Noto Sans KR', sans-serif`;
+    ctx.fillStyle   = `rgba(255,220,200,${textAlpha})`;
+    ctx.textAlign   = 'center';
+    ctx.textBaseline= 'middle';
+    ctx.fillText('포탄이 지구에 충돌했습니다!', W/2, H/2);
+    ctx.shadowBlur  = 0;
+    // 작은 서브텍스트
+    ctx.font        = `${Math.round(W * 0.016)}px 'Space Mono', monospace`;
+    ctx.fillStyle   = `rgba(255,160,120,${textAlpha * 0.75})`;
+    ctx.fillText(
+      `착탄각 ${sim.stats.impactAngle.toFixed(1)}°  |  비행거리 ${fmtDist(sim.stats.flightDist)}`,
+      W/2, H/2 + W * 0.038
+    );
+    ctx.restore();
+  }
+}
+
+// ── 반동 오프셋 계산 (drawCannon에서 사용) ──
+function getRecoilOffset() {
+  if (!launchFx.recoilActive && launchFx.recoilT === 0) return 0;
+  // 반동: sin 곡선으로 뒤로 밀렸다 복귀
+  const t = launchFx.recoilT;
+  return -Math.sin(t * Math.PI) * 12;  // 최대 12px 뒤로
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  물리 엔진
+// ═══════════════════════════════════════════════════════════════
+function gravity(pos) {
+  const r2 = pos.x*pos.x + pos.y*pos.y;
+  const r  = Math.sqrt(r2);
+  const a  = -GM / r2;
+  return { x: a*(pos.x/r), y: a*(pos.y/r) };
+}
+
+function verletStep(pos, vel, acc) {
+  const newPos = {
+    x: pos.x + vel.x*DT + 0.5*acc.x*DT*DT,
+    y: pos.y + vel.y*DT + 0.5*acc.y*DT*DT,
+  };
+  const newAcc = gravity(newPos);
+  const newVel = {
+    x: vel.x + 0.5*(acc.x + newAcc.x)*DT,
+    y: vel.y + 0.5*(acc.y + newAcc.y)*DT,
+  };
+  return { pos:newPos, vel:newVel, acc:newAcc };
+}
+
+function launchSim() {
+  if (sim.active) return;
+  const r0 = R_EARTH + H_MOUNT;
+  const aR = angleDeg * Math.PI/180;
+  sim.pos     = { x: 0, y: r0 };
+  sim.vel     = { x: initSpeed*Math.cos(aR), y: initSpeed*Math.sin(aR) };
+  sim.acc     = gravity(sim.pos);
+  sim.trail   = [{ x:0, y:r0, spd:initSpeed, alt:H_MOUNT }];
+  sim.elapsed = 0; sim.done = false; sim.result = ''; sim.active = true;
+  sim.stats   = { maxAlt:H_MOUNT, maxAltPos:{x:0,y:r0}, impactAngle:0,
+                  impactPos:null, flightDist:0, escapeDir:0 };
+  sim._prevPos = { x:0, y:r0 };
+  // 단계 6: 발사 이펙트 트리거
+  triggerLaunchFx();
+}
+
+function resetSim() {
+  sim.active = false; sim.done = false; sim.trail = []; sim.elapsed = 0;
+  updateHUD(null);
+  zoom.target = speedToZoom(initSpeed);
+  CAM.tracking = false;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  CAM.smoothOx = W / 2; CAM.smoothOy = H / 2;
+  VIEW.ox = W / 2;      VIEW.oy = H / 2;
+  // 이펙트 초기화
+  particles = [];
+  launchFx.active = false; launchFx.recoilActive = false; launchFx.recoilT = 0;
+  explosionFx.active = false; explosionFx.overlayAlpha = 0;
+  // HUD 패널 테두리 초기화 (함수가 정의된 후 실행됨)
+  const panel = document.getElementById('hud-panel');
+  if (panel) panel.classList.remove('impact','orbit','escape');
+}
+
+// ── 단계 4: 궤적 밀도 적응형 저장 ──
+// 지표 근처(고도 < 5Re)에서는 촘촘히, 먼 우주는 성기게
+let _trailCounter = 0;
+function shouldRecordTrail(alt) {
+  _trailCounter++;
+  if (alt < H_MOUNT * 20)   return _trailCounter % 1  === 0;  // 매 스텝
+  if (alt < R_EARTH * 0.5)  return _trailCounter % 2  === 0;
+  if (alt < R_EARTH * 2)    return _trailCounter % 4  === 0;
+  return                           _trailCounter % 8  === 0;
+}
+
+// ── 단계 5: stepSim — 충돌·이탈 판정 + 통계 수집 ──
+function stepSim() {
+  if (!sim.active || sim.done) return;
+  // 단계 9: 시뮬레이션 속도 배율 적용
+  const steps = simSpeedMult;
+  for (let i = 0; i < steps; i++) {
+    sim._prevPos = { ...sim.pos };
+    const res = verletStep(sim.pos, sim.vel, sim.acc);
+    sim.pos = res.pos; sim.vel = res.vel; sim.acc = res.acc;
+    sim.elapsed += DT;
+
+    const r   = Math.sqrt(sim.pos.x**2 + sim.pos.y**2);
+    const alt = r - R_EARTH;
+    const spd = Math.sqrt(sim.vel.x**2 + sim.vel.y**2);
+
+    // 최고 고도 갱신
+    if (alt > sim.stats.maxAlt) {
+      sim.stats.maxAlt    = alt;
+      sim.stats.maxAltPos = { ...sim.pos };
+    }
+
+    // 궤적 기록 (밀도 적응형, 최대 12000점)
+    if (sim.trail.length < 12000 && shouldRecordTrail(alt)) {
+      sim.trail.push({ x:sim.pos.x, y:sim.pos.y, spd, alt });
+    }
+
+    // ── 착탄 판정 ──
+    if (r <= R_EARTH) {
+      // 착탄 지점: 선형 보간으로 지표면 정확히 찾기
+      const prevR = Math.sqrt(sim._prevPos.x**2 + sim._prevPos.y**2);
+      const t = (prevR - R_EARTH) / (prevR - r);
+      sim.stats.impactPos = {
+        x: sim._prevPos.x + (sim.pos.x - sim._prevPos.x) * t,
+        y: sim._prevPos.y + (sim.pos.y - sim._prevPos.y) * t,
+      };
+      // 착탄 속도 벡터와 지표면 법선 사이 각도 (입사각)
+      const nx = sim.stats.impactPos.x / R_EARTH;
+      const ny = sim.stats.impactPos.y / R_EARTH;
+      const vMag = Math.sqrt(sim.vel.x**2 + sim.vel.y**2);
+      const vNorm = (sim.vel.x*nx + sim.vel.y*ny) / vMag;  // cos(입사각)
+      sim.stats.impactAngle = Math.acos(Math.max(-1,Math.min(1,-vNorm))) * 180/Math.PI;
+      // 지표면 호 비행거리: 발사점(0,R) → 착탄점 사이 각도
+      const dot = (0 * sim.stats.impactPos.x + R_EARTH * sim.stats.impactPos.y)
+                  / (R_EARTH * R_EARTH);
+      sim.stats.flightDist = Math.acos(Math.max(-1,Math.min(1,dot))) * R_EARTH;
+      sim.trail.push({ x:sim.stats.impactPos.x, y:sim.stats.impactPos.y, spd, alt:0 });
+      sim.done=true; sim.active=false; sim.result='impact';
+      // 단계 7: 폭발 이펙트 트리거
+      triggerExplosionFx(sim.stats.impactPos.x, sim.stats.impactPos.y);
+      break;
+    }
+
+    // ── 이탈 판정 ──
+    if (r >= R_EARTH * 10) {
+      sim.stats.escapeDir = Math.atan2(sim.vel.y, sim.vel.x);
+      sim.stats.flightDist = sim.elapsed * (initSpeed * 0.5);  // 근사
+      sim.done=true; sim.active=false; sim.result='escape'; break;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HUD — 단계 5: 실시간 텔레메트리 + 착탄/이탈 통계
+// ═══════════════════════════════════════════════════════════════
+function orbitPreviewText(v) {
+  if (v <= 200)       return { txt:'미발사',      cls:'idle'   };
+  if (v < V1 * 0.94)  return { txt:'포물선 낙하',  cls:'fall'   };
+  if (v < V2 * 0.98)  return { txt:'타원/원 궤도', cls:'orbit2' };
+  return               { txt:'탈출 궤도',    cls:'escape2'};
+}
+
+function fmtAlt(m) {
+  if (m < 1000) return m.toFixed(0) + ' m';
+  if (m < 1e6)  return (m/1000).toFixed(1) + ' km';
+  return (m/1000).toFixed(0) + ' km';
+}
+function fmtDist(m) {
+  if (m < 1000) return m.toFixed(0) + ' m';
+  if (m < 1e6)  return (m/1000).toFixed(0) + ' km';
+  return (m/1e6).toFixed(2) + ' Mm';
+}
+
+function updateHUD(s) {
+  const eS = document.getElementById('hud-spd');
+  const eA = document.getElementById('hud-alt');
+  const eT = document.getElementById('hud-t');
+  const eO = document.getElementById('hud-orbit');
+  const eSt= document.getElementById('hud-stats');
+
+  if (!s) {
+    eS.textContent = '— m/s'; eA.textContent = '—'; eT.textContent = '0.0 s';
+    const prev = orbitPreviewText(initSpeed);
+    eO.textContent = prev.txt;
+    eO.className = 'orbit-badge ' + prev.cls;
+    eSt.style.display = 'none';
+    return;
+  }
+
+  const r   = Math.sqrt(s.pos.x**2 + s.pos.y**2);
+  const spd = Math.sqrt(s.vel.x**2 + s.vel.y**2);
+  const alt = r - R_EARTH;
+  eS.textContent = spd.toFixed(0) + ' m/s';
+  eA.textContent = fmtAlt(alt);
+
+  const t = s.elapsed;
+  eT.textContent = t < 3600   ? t.toFixed(0) + ' s'
+                 : t < 86400  ? (t/3600).toFixed(2) + ' hr'
+                 :              (t/86400).toFixed(2) + ' day';
+
+  // 궤도 유형 배지
+  let orb = '', orbClass = 'idle', hudBorder = null;
+  if (s.done && s.result === 'impact')   {
+    orb='💥 충돌'; orbClass='impact2'; hudBorder='impact'; setBtnFire(false);
+  }
+  else if (s.done && s.result==='escape'){
+    orb='🚀 탈출'; orbClass='escape2'; hudBorder='escape'; setBtnFire(false);
+  }
+  else {
+    const v1l = Math.sqrt(GM/r), v2l = v1l*Math.sqrt(2);
+    if (spd >= v2l*0.98)      { orb='탈출 궤도';    orbClass='escape2'; hudBorder='escape'; }
+    else if (spd >= v1l*0.92) { orb='타원/원 궤도'; orbClass='orbit2';  hudBorder='orbit';  }
+    else                      { orb='포물선 낙하';  orbClass='fall';                        }
+  }
+  eO.textContent = orb;
+  eO.className = 'orbit-badge ' + orbClass;
+  updateHudBorder(hudBorder);
+
+  // ── 단계 5: 통계 패널 ──
+  eSt.style.display = 'block';
+  document.getElementById('hud-maxalt').textContent = fmtAlt(s.stats.maxAlt);
+
+  const impRow  = document.getElementById('hud-impact-row');
+  const distRow = document.getElementById('hud-dist-row');
+
+  if (s.done && s.result === 'impact') {
+    impRow.style.display  = 'flex';
+    distRow.style.display = 'flex';
+    document.getElementById('hud-impang').textContent = s.stats.impactAngle.toFixed(1) + '°';
+    document.getElementById('hud-dist').textContent   = fmtDist(s.stats.flightDist);
+  } else if (s.done && s.result === 'escape') {
+    impRow.style.display  = 'none';
+    distRow.style.display = 'flex';
+    document.getElementById('hud-dist').textContent = t < 86400
+      ? (t/3600).toFixed(1) + ' hr 비행'
+      : (t/86400).toFixed(1) + ' day 비행';
+  } else {
+    // 비행 중: 최고고도만 표시
+    impRow.style.display  = 'none';
+    distRow.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  단계 4: 궤적 렌더링 — 속도 기반 색상 + 고도 기반 두께
+//  단계 5: 착탄 마커 / 이탈 화살표 / 최고고도 마커
+// ═══════════════════════════════════════════════════════════════
+
+// 속도(m/s) → 궤적 색상
+function trailColor(spd, alpha) {
+  // 저속(~0): 주황  →  V1(7905): 청록  →  V2+(11186): 보라
+  const t1 = Math.min(1, spd / V1);
+  const t2 = Math.min(1, Math.max(0, (spd - V1) / (V2 - V1)));
+  const r = Math.round(255 * (1-t1) * 0.8 + 58 * t1 * (1-t2)  + 180 * t2);
+  const g = Math.round(160 * (1-t1) * 0.5 + 200 * t1 * (1-t2) + 80  * t2);
+  const b = Math.round(40  * (1-t1)        + 255 * t1 * (1-t2) + 255 * t2);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function drawTrail() {
+  if (!showTrail || sim.trail.length < 2) return;
+  const trail = sim.trail, total = trail.length;
+
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap  = 'round';
+
+  for (let i = 1; i < total; i++) {
+    const p0 = trail[i-1], p1 = trail[i];
+    const s0 = worldToScreen(p0.x, p0.y);
+    const s1 = worldToScreen(p1.x, p1.y);
+
+    const prog  = i / total;
+    const alpha = 0.12 + prog * 0.75;
+
+    // 고도에 따라 두께 변화: 지표 근처 굵게, 우주 얇게
+    const altNorm = Math.min(1, (p1.alt || 0) / (R_EARTH * 2));
+    const lw = 2.5 - altNorm * 1.2;
+    ctx.lineWidth = Math.max(0.8, lw);
+
+    ctx.beginPath();
+    ctx.moveTo(s0.x, s0.y);
+    ctx.lineTo(s1.x, s1.y);
+    ctx.strokeStyle = trailColor(p1.spd || 0, alpha);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 최고고도 마커 (비행 중·착탄 후 모두)
+  drawMaxAltMarker();
+
+  // 착탄 마커
+  if (sim.done && sim.result === 'impact' && sim.stats.impactPos) {
+    drawImpactMarker(sim.stats.impactPos);
+  }
+  // 이탈 화살표
+  if (sim.done && sim.result === 'escape') {
+    drawEscapeArrow();
+  }
+}
+
+function drawMaxAltMarker() {
+  if (!sim.stats.maxAltPos || sim.stats.maxAlt < H_MOUNT * 2) return;
+  const sp = worldToScreen(sim.stats.maxAltPos.x, sim.stats.maxAltPos.y);
+  const r  = Math.max(5, R_SURFACE_PX * 0.025);
+
+  ctx.save();
+  // 다이아몬드 마커
+  ctx.beginPath();
+  ctx.moveTo(sp.x,    sp.y - r*1.6);
+  ctx.lineTo(sp.x + r,sp.y);
+  ctx.lineTo(sp.x,    sp.y + r*1.6);
+  ctx.lineTo(sp.x - r,sp.y);
+  ctx.closePath();
+  ctx.fillStyle   = 'rgba(126,240,200,0.25)';
+  ctx.strokeStyle = 'rgba(126,240,200,0.80)';
+  ctx.lineWidth   = 1.5;
+  ctx.fill(); ctx.stroke();
+
+  // 레이블
+  ctx.font         = 'bold 13px "Space Mono",monospace';
+  ctx.fillStyle    = 'rgba(126,240,200,0.85)';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('▲ ' + fmtAlt(sim.stats.maxAlt), sp.x, sp.y - r*2);
+  ctx.restore();
+}
+
+function drawImpactMarker(pos) {
+  const sp = worldToScreen(pos.x, pos.y);
+  const r  = Math.max(6, R_SURFACE_PX * 0.035);
+
+  ctx.save();
+  // 충격파 링 (3겹)
+  for (let i = 3; i >= 1; i--) {
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, r * i * 0.9, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(255,${80+i*30},40,${0.5/i})`;
+    ctx.lineWidth   = 2 / i;
+    ctx.stroke();
+  }
+  // 중심 원
+  ctx.beginPath(); ctx.arc(sp.x, sp.y, r*0.55, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,100,40,0.85)'; ctx.fill();
+
+  // X 마크
+  const x2 = r * 0.35;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(sp.x-x2,sp.y-x2); ctx.lineTo(sp.x+x2,sp.y+x2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(sp.x+x2,sp.y-x2); ctx.lineTo(sp.x-x2,sp.y+x2); ctx.stroke();
+
+  // 착탄각 레이블
+  ctx.font         = 'bold 13px "Space Mono",monospace';
+  ctx.fillStyle    = 'rgba(255,140,80,0.9)';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('💥 ' + sim.stats.impactAngle.toFixed(1) + '°', sp.x, sp.y + r*1.2);
+  ctx.restore();
+}
+
+function drawEscapeArrow() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  // 화면 가장자리에 탈출 방향 화살표
+  const dir = sim.stats.escapeDir;
+  const cx = VIEW.ox, cy = VIEW.oy;
+  // 화면 가장자리와의 교점
+  const edgeR = Math.min(W, H) * 0.42;
+  const ax = cx + Math.cos(dir) * edgeR;
+  // y 반전 (물리→화면)
+  const ay = cy - Math.sin(dir) * edgeR;
+
+  ctx.save();
+  ctx.translate(ax, ay);
+  // dir가 물리 좌표계이므로 화면에서 반전
+  const screenAngle = -dir; // 화면 y축 반전 보정
+  ctx.rotate(screenAngle - Math.PI/2);
+
+  // 화살표
+  const sz = 18;
+  ctx.beginPath();
+  ctx.moveTo(0, -sz);
+  ctx.lineTo(-sz*0.5, sz*0.4);
+  ctx.lineTo(0, 0);
+  ctx.lineTo(sz*0.5, sz*0.4);
+  ctx.closePath();
+  ctx.fillStyle   = 'rgba(126,240,200,0.85)';
+  ctx.strokeStyle = 'rgba(126,240,200,0.4)';
+  ctx.lineWidth   = 1;
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+
+  // 텍스트
+  ctx.save();
+  ctx.font         = 'bold 13px "Space Mono",monospace';
+  ctx.fillStyle    = 'rgba(126,240,200,0.8)';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🚀 탈출', ax, ay + 28);
+  ctx.restore();
+}
+
+function drawBall() {
+  if (!sim.active && !sim.done) return;
+  if (sim.trail.length === 0) return;
+  // 비행 완료 후엔 대포알 숨김 (마커가 대신)
+  if (sim.done) return;
+
+  const last = sim.trail[sim.trail.length-1];
+  const sp   = worldToScreen(last.x, last.y);
+  const br   = Math.max(4, R_SURFACE_PX * 0.032);
+
+  // 속도에 따라 색상 변화
+  const spd  = last.spd || initSpeed;
+  const t1   = Math.min(1, spd / V1);
+  const ballR_inner = `rgb(${Math.round(255*(1-t1)+120*t1)},${Math.round(220*(1-t1)+240*t1)},255)`;
+
+  ctx.beginPath(); ctx.arc(sp.x, sp.y, br, 0, Math.PI*2);
+  const g = ctx.createRadialGradient(sp.x-br*0.3,sp.y-br*0.3,0,sp.x,sp.y,br);
+  g.addColorStop(0,'#ffffff');
+  g.addColorStop(0.4, ballR_inner);
+  g.addColorStop(1, trailColor(spd, 1));
+  ctx.fillStyle = g; ctx.fill();
+
+  // 글로우
+  ctx.beginPath(); ctx.arc(sp.x, sp.y, br*3, 0, Math.PI*2);
+  const glow = ctx.createRadialGradient(sp.x,sp.y,br*0.5,sp.x,sp.y,br*3);
+  glow.addColorStop(0, trailColor(spd, 0.3));
+  glow.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = glow; ctx.fill();
+
+  // 속도 꼬리 (방향 표시)
+  if (spd > 500 && sim.trail.length > 3) {
+    const tail = sim.trail[Math.max(0, sim.trail.length-6)];
+    const ts   = worldToScreen(tail.x, tail.y);
+    ctx.save();
+    const tailGrad = ctx.createLinearGradient(ts.x,ts.y,sp.x,sp.y);
+    tailGrad.addColorStop(0,'rgba(0,0,0,0)');
+    tailGrad.addColorStop(1, trailColor(spd, 0.6));
+    ctx.beginPath(); ctx.moveTo(ts.x,ts.y); ctx.lineTo(sp.x,sp.y);
+    ctx.strokeStyle = tailGrad; ctx.lineWidth = br*1.2; ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  단계 8: 격자 오버레이 개선 (로그 좌표 동심원 + 고도 레이블)
+// ═══════════════════════════════════════════════════════════════
+function drawGrid() {
+  if (!showGrid) return;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const cx = VIEW.ox, cy = VIEW.oy;
+  ctx.save();
+
+  // ── 동심원: 물리적으로 의미 있는 거리 ──
+  // 지표면 근처(로그 압축 경계 안): 고도 단위
+  // 우주 공간(로그 압축 구간): Re 배수
+  const rings = [
+    { r: R_EARTH,              label: '지표면',    dim: true  },
+    { r: R_EARTH + H_MOUNT,    label: '8,848m',   dim: true  },
+    { r: R_EARTH * 1.1,        label: '0.1 Re',   dim: false },
+    { r: R_EARTH * 1.5,        label: '0.5 Re',   dim: false },
+    { r: R_EARTH * 2,          label: '1 Re',     dim: false },
+    { r: R_EARTH * 3,          label: '2 Re',     dim: false },
+    { r: R_EARTH * 5,          label: '4 Re',     dim: false },
+    { r: R_EARTH * 8,          label: '7 Re',     dim: false },
+    { r: R_EARTH * 10,         label: '탈출한계',  dim: false },
+  ];
+
+  for (const ring of rings) {
+    const rPx = rToScreen(ring.r);
+    if (rPx < 2 || rPx > Math.max(W, H) * 1.5) continue;
+
+    ctx.beginPath(); ctx.arc(cx, cy, rPx, 0, Math.PI * 2);
+    ctx.strokeStyle = ring.dim
+      ? 'rgba(58,142,255,0.06)'
+      : 'rgba(58,142,255,0.10)';
+    ctx.lineWidth = ring.dim ? 0.8 : 1;
+    ctx.stroke();
+
+    if (!ring.dim) {
+      // 레이블: 우상단 45도 방향에 표시
+      const lAngle = -Math.PI / 4;
+      const lx = cx + rPx * Math.cos(lAngle) + 5;
+      const ly = cy + rPx * Math.sin(lAngle) - 4;
+      ctx.save();
+      ctx.font = '10px "Space Mono",monospace';
+      ctx.fillStyle = 'rgba(58,142,255,0.45)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(ring.label, lx, ly);
+      ctx.restore();
+    }
+  }
+
+  // ── 방사선: 22.5° 간격 ──
+  ctx.strokeStyle = 'rgba(58,142,255,0.05)';
+  ctx.lineWidth = 0.8;
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * Math.max(W, H) * 1.4,
+               cy + Math.sin(a) * Math.max(W, H) * 1.4);
+    ctx.stroke();
+  }
+
+  // ── 속도 궤도 참고원: V1(원궤도 반경), V2(탈출) ──
+  // V1 원궤도 반경 ≈ R_EARTH + H_MOUNT (발사 고도)
+  const rOrbit = R_EARTH + H_MOUNT;
+  const rOrbitPx = rToScreen(rOrbit);
+  if (rOrbitPx > 2 && rOrbitPx < Math.max(W, H) * 1.5) {
+    ctx.beginPath(); ctx.arc(cx, cy, rOrbitPx, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(58,142,255,0.18)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([6, 8]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 레이블
+    ctx.save();
+    ctx.font = '10px "Space Mono",monospace';
+    ctx.fillStyle = 'rgba(58,142,255,0.55)';
+    ctx.textAlign = 'center';
+    ctx.fillText('원궤도', cx, cy - rOrbitPx - 6);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  단계 9: UI 마무리 — 시뮬 속도, 슬라이더 색상, 키보드 단축키
+// ═══════════════════════════════════════════════════════════════
+
+// ── 시뮬레이션 속도 ──
+let simSpeedMult = 8;  // 기본 ×8
+
+function setSimSpeed(mult) {
+  simSpeedMult = mult;
+  document.querySelectorAll('.speed-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.mult) === mult);
+  });
+  document.getElementById('simspd-val').textContent = '×' + mult;
+  document.getElementById('simspd-badge').style.display = 'flex';
+}
+
+document.querySelectorAll('.speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => setSimSpeed(parseInt(btn.dataset.mult)));
+});
+
+// ── 속도 슬라이더 배경 색상 업데이트 (구간: 낙하/궤도/탈출) ──
+function updateSpeedSliderBg(v) {
+  const sSpd = document.getElementById('s-spd');
+  const pct  = v / 12000 * 100;
+  const p1   = V1 / 12000 * 100;
+  const p2   = V2 / 12000 * 100;
+
+  let col;
+  if (v < V1 * 0.94)        col = '#cc6020';  // 낙하 → 주황
+  else if (v < V2 * 0.98)   col = '#3a8eff';  // 궤도 → 파랑
+  else                       col = '#7ef0c8';  // 탈출 → 청록
+
+  sSpd.style.background = `linear-gradient(to right,
+    ${col} 0%, ${col} ${pct}%,
+    rgba(60,100,180,0.30) ${pct}%, rgba(60,100,180,0.30) 100%)`;
+}
+
+// ── HUD 패널 테두리 색상 ──
+function updateHudBorder(state) {
+  const panel = document.getElementById('hud-panel');
+  panel.classList.remove('impact','orbit','escape');
+  if (state) panel.classList.add(state);
+}
+
+// ── 발사 버튼 상태 ──
+function setBtnFire(launched) {
+  const btn = document.getElementById('btn-fire');
+  btn.classList.toggle('launched', launched);
+  btn.textContent = launched ? '⏳ 비행 중' : '🚀 발사';
+}
+
+// ── 이벤트 ──
+const sAng2 = document.getElementById('s-ang');
+const sSpd2 = document.getElementById('s-spd');
+const vAng2 = document.getElementById('v-ang');
+const vSpd2 = document.getElementById('v-spd');
+
+sAng2.addEventListener('input', () => {
+  angleDeg = parseInt(sAng2.value);
+  vAng2.textContent = angleDeg + '°';
+});
+
+sSpd2.addEventListener('input', () => {
+  initSpeed = parseInt(sSpd2.value);
+  vSpd2.textContent = (initSpeed / 1000).toFixed(1) + ' km/s';
+  updateSpeedSliderBg(initSpeed);
+  if (!sim.active && !sim.done) {
+    zoom.target = speedToZoom(initSpeed);
+    updateHUD(null);
+  }
+});
+
+document.getElementById('chk-trail').addEventListener('change', e => { showTrail = e.target.checked; });
+document.getElementById('chk-grid').addEventListener('change',  e => { showGrid  = e.target.checked; });
+
+document.getElementById('btn-fire').addEventListener('click', () => {
+  launchSim();
+  setBtnFire(true);
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  resetSim();
+  setBtnFire(false);
+  updateHudBorder(null);
+  updateSpeedSliderBg(initSpeed);
+});
+
+// ── 키보드 단축키 ──
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  switch (e.key) {
+    case ' ': case 'Enter':
+      e.preventDefault();
+      if (!sim.active) { launchSim(); setBtnFire(true); }
+      break;
+    case 'r': case 'R':
+      resetSim(); setBtnFire(false); updateHudBorder(null);
+      break;
+    case 'g': case 'G':
+      const chk = document.getElementById('chk-grid');
+      chk.checked = !chk.checked;
+      showGrid = chk.checked;
+      break;
+    case 't': case 'T':
+      const chkT = document.getElementById('chk-trail');
+      chkT.checked = !chkT.checked;
+      showTrail = chkT.checked;
+      break;
+    case '1': setSimSpeed(1);   break;
+    case '2': setSimSpeed(8);   break;
+    case '3': setSimSpeed(32);  break;
+    case '4': setSimSpeed(128); break;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  모바일 동적 레이아웃
+//  ctrl-panel 실측 높이를 기준으로 btn-group / check-group 위치 계산
+// ═══════════════════════════════════════════════════════════════
+
+function updateMobileLayout() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const isPortraitMobile = vw <= 767 && vh >= 480;
+  const isLandscape      = vh <= 500;
+
+  const ctrlPanel  = document.querySelector('.ctrl-panel');
+  const btnGroup   = document.querySelector('.btn-group');
+  const checkGroup = document.querySelector('.check-group');
+
+  if (isPortraitMobile) {
+    // 세로 모드: ctrl-panel 이 하단 전체 차지
+    // offsetHeight 측정을 위해 레이아웃 페인트 후 계산
+    requestAnimationFrame(() => {
+      const ctrlH = ctrlPanel.offsetHeight;
+      const gap   = 10;
+
+      // 버튼 그룹: ctrl-panel 바로 위, 좌우 꽉 채움
+      btnGroup.style.bottom  = (ctrlH + gap) + 'px';
+      btnGroup.style.left    = '18px';
+      btnGroup.style.right   = '18px';
+      btnGroup.style.top     = 'auto';
+
+      requestAnimationFrame(() => {
+        const btnH = btnGroup.offsetHeight;
+        // 체크박스 그룹: 버튼 그룹 위
+        checkGroup.style.bottom    = (ctrlH + gap + btnH + gap) + 'px';
+        checkGroup.style.left      = '18px';
+        checkGroup.style.right     = 'auto';
+        checkGroup.style.transform = 'none';
+      });
+    });
+
+  } else {
+    // 가로 모드 / 데스크톱: 인라인 스타일 초기화 → CSS 기본값 복원
+    btnGroup.style.cssText   = '';
+    checkGroup.style.cssText = '';
+  }
+}
+
+// 화면 회전 대응
+window.addEventListener('orientationchange', () => {
+  setTimeout(() => { resize(); }, 300);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  메인 렌더 루프
+// ═══════════════════════════════════════════════════════════════
+let _lastRenderTime = 0;
+function render(now = 0) {
+  const dt = Math.min(0.05, (now - _lastRenderTime) / 1000);
+  _lastRenderTime = now;
+
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  ctx.clearRect(0, 0, W, H);
+
+  // 1. 줌 보간 + 파생값 갱신 (매 프레임 최우선)
+  updateZoom();
+  // 1b. 카메라 추적 업데이트
+  updateCamera();
+
+  // 2. 배경
+  const bg = ctx.createRadialGradient(W*0.5,H*0.5,0,W*0.5,H*0.5,Math.max(W,H)*0.7);
+  bg.addColorStop(0,'#0b1220'); bg.addColorStop(1,'#050a14');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+  // 3. 장면 드로잉
+  drawStars();
+  drawGrid();
+  drawEarth();
+  drawMountainAndCannon();  // 조준선 + 산 + 대포 (각도 실시간 반영)
+
+  // 4. 물리 진행
+  stepSim();
+  drawTrail();
+  drawBall();
+
+  // 5. 단계 6·7: 이펙트 업데이트 + 렌더
+  updateLaunchFx(now);
+  updateExplosionFx(now, dt);
+  updateAndDrawParticles(dt);
+  drawExplosionFx();  // 오버레이·링·경고 텍스트 (맨 위에 렌더)
+
+  // 6. HUD
+  if (sim.active || sim.done) updateHUD(sim);
+
+  requestAnimationFrame(render);
+}
+
+// ── 초기화 ──
+resize();
+updateHUD(null);
+updateSpeedSliderBg(initSpeed);
+setSimSpeed(8);
+// 초기 모바일 레이아웃: 첫 렌더 후 재계산 (offsetHeight 확보)
+requestAnimationFrame(() => updateMobileLayout());
+render();
+</script>
+</body>
+</html>
