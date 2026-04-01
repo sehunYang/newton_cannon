@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>뉴턴의 대포 — 궤도 시뮬레이터</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
@@ -22,7 +22,9 @@
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:var(--bg); color:var(--text);
          font-family:'Noto Sans KR',sans-serif;
-         overflow:hidden; width:100vw; height:100vh; }
+         overflow:hidden;
+         width:100vw;
+         height:100vh; height:100dvh; }   /* dvh: 브라우저 UI 제외 실제 높이 */
   #wrap { position:relative; width:100%; height:100%; }
   canvas { display:block; width:100%; height:100%; }
   .ui { position:absolute; inset:0; pointer-events:none; }
@@ -271,21 +273,29 @@
     .orbit-badge { font-size: 10px; padding: 2px 7px; }
     #hud-stats { display: none !important; } /* 통계는 모바일 세로에서 숨김 */
 
-    /* 컨트롤 패널: 하단 전체 너비 */
+    /* 컨트롤 패널: 하단 전체 너비
+       position:fixed — iOS Safari vh 버그 우회, 항상 실제 뷰포트 기준 배치 */
     .ctrl-panel {
+      position: fixed;
       bottom: 0; left: 0; right: 0;
       min-width: 0;
       border-radius: 16px 16px 0 0;
-      padding: 14px 18px;
-      padding-bottom: max(env(safe-area-inset-bottom, 14px), 14px);
+      padding: 12px 18px;
+      /* safe-area-inset: 홈 바 / 제스처 영역 확보 */
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+      /* 최대 높이 제한 + 내부 스크롤: 컨텐츠가 길어도 잘림 방지 */
+      max-height: 52dvh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
-    .ctrl-title { font-size: 10px; margin-bottom: 10px; padding-bottom: 7px; }
-    .ctrl-row { margin-bottom: 10px; }
-    .ctrl-label-row { margin-bottom: 5px; }
+    .ctrl-title { font-size: 10px; margin-bottom: 8px; padding-bottom: 6px; }
+    .ctrl-row { margin-bottom: 8px; }
+    .ctrl-row:last-child { margin-bottom: 0; }
+    .ctrl-label-row { margin-bottom: 4px; }
     .ctrl-label, .ctrl-val { font-size: 12px; }
     .sim-speed-label { font-size: 11px; }
-    .speed-btn { font-size: 10px; padding: 6px 0; min-height: 32px; }
-    .speed-marker-wrap { height: 18px; margin-top: 4px; }
+    .speed-btn { font-size: 10px; padding: 5px 0; min-height: 30px; }
+    .speed-marker-wrap { height: 16px; margin-top: 3px; }
     .speed-tick { font-size: 9px; }
 
     /* 버튼 그룹: JS로 ctrl-panel 위에 동적 배치
@@ -319,7 +329,11 @@
     .hud { width: clamp(150px, 50vw, 200px); padding: 8px 10px; }
     .hud-title { font-size: 8px; }
     .hud-label, .hud-value { font-size: 10px; }
-    .ctrl-panel { padding: 12px 14px; padding-bottom: max(env(safe-area-inset-bottom, 12px), 12px); }
+    .ctrl-panel {
+      padding: 10px 14px;
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+      max-height: 50dvh;
+    }
     .btn { font-size: 11px; }
     .badge-pill span, .badge-pill b { font-size: 10px; }
   }
@@ -1989,7 +2003,7 @@ document.addEventListener('keydown', e => {
 
 function updateMobileLayout() {
   const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const vh = window.innerHeight;   // 브라우저 UI 제외 실제 높이
   const isPortraitMobile = vw <= 767 && vh >= 480;
   const isLandscape      = vh <= 500;
 
@@ -1998,11 +2012,16 @@ function updateMobileLayout() {
   const checkGroup = document.querySelector('.check-group');
 
   if (isPortraitMobile) {
-    // 세로 모드: ctrl-panel 이 하단 전체 차지
-    // offsetHeight 측정을 위해 레이아웃 페인트 후 계산
+    // safe-area-inset-bottom 계산 (CSS env() 사용)
+    const safeBottom = parseInt(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue('--sai-bottom') || '0'
+    ) || 0;
+
+    // offsetHeight: ctrl-panel의 실제 렌더 높이 (padding-bottom 포함)
     requestAnimationFrame(() => {
       const ctrlH = ctrlPanel.offsetHeight;
-      const gap   = 10;
+      const gap   = 8;
 
       // 버튼 그룹: ctrl-panel 바로 위, 좌우 꽉 채움
       btnGroup.style.bottom  = (ctrlH + gap) + 'px';
@@ -2022,6 +2041,8 @@ function updateMobileLayout() {
 
   } else {
     // 가로 모드 / 데스크톱: 인라인 스타일 초기화 → CSS 기본값 복원
+    // ctrl-panel도 position:absolute로 복원
+    ctrlPanel.style.cssText  = '';
     btnGroup.style.cssText   = '';
     checkGroup.style.cssText = '';
   }
