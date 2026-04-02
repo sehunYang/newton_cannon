@@ -552,6 +552,11 @@ let sim = {
   elapsed: 0,
   done: false,
   result: '',     // 'impact' | 'escape'
+  // 1회 공전 궤적 잠금 상태
+  trailLocked: false,   // true 이면 궤적 기록 중단 (1회 공전 완료)
+  _prevAngle: 0,        // 이전 스텝 각도 (공전 감지용)
+  _totalAngle: 0,       // 누적 각도 변화량 (|값| >= 2π → 1회 공전 완료)
+  _orbitStarted: false, // 공전 감지 시작 여부 (초기 소각 방지)
   // 단계 5: 충돌·이탈 분석 데이터
   stats: {
     maxAlt: 0,           // 최고 고도 (m)
@@ -587,11 +592,12 @@ let R_MOUNT_PX   = 0;
 let zoom = { current: 1.0, target: 1.0 };
 
 // 발사속도 → 권장 줌 (발사 전 미리보기 + 비행 중 기준선)
+// k 제한(1.5*R_MOUNT_PX) 이후 궤도가 화면에 알맞게 들어오도록 줌 조정
 function speedToZoom(v) {
   if (v <= 4000)  return 1.0;
   if (v <= V1)    return 1.0;
-  if (v <= V2)    return 0.55 - 0.20 * ((v - V1) / (V2 - V1));
-  return 0.30;
+  if (v <= V2)    return 0.60 - 0.30 * ((v - V1) / (V2 - V1));  // 0.60→0.30 (V1→V2)
+  return 0.26;
 }
 
 // 포탄 고도 → 필요 줌
@@ -602,7 +608,9 @@ function altToZoom(r) {
   if (alt <= R_EARTH * 0.8)  return 0.72;
   if (alt <= R_EARTH * 1.5)  return 0.58;
   if (alt <= R_EARTH * 3)    return 0.44;
-  return 0.32;
+  if (alt <= R_EARTH * 10)   return 0.36;
+  if (alt <= R_EARTH * 30)   return 0.30;
+  return 0.26;  // 30 Re 이상 (근 V2 고타원 궤도)
 }
 
 // 매 프레임 줌 업데이트 (부드러운 지수 보간)
@@ -666,10 +674,16 @@ function rToScreen(rWorld) {
     const t = Math.max(0, (rWorld - R_EARTH) / H_MOUNT);
     return R_SURFACE_PX + t * (R_MOUNT_PX - R_SURFACE_PX);
   }
-  // 로그 구간: R_EARTH*10 이 화면 80% 가장자리에 오도록 k 결정
+  // 로그 구간: R_EARTH*80(≈510,000km, 11.1km/s 원지점 커버) 이 화면 80% 가장자리에 오도록 k 결정
   const W = canvas.clientWidth, H = canvas.clientHeight;
   const maxPx = Math.max(W, H) * 0.80;
-  const k = (maxPx - R_MOUNT_PX) / Math.log(R_EARTH * 10 / rMount);
+  const k_raw = (maxPx - R_MOUNT_PX) / Math.log(R_EARTH * 80 / rMount);
+  // ── 버그 수정: 시각적 곡률 반전(하트 모양 아티팩트) 방지 ──
+  // 근지점(periapsis)에서의 화면 곡률이 뒤집히는 조건:
+  //   k > R_MOUNT_PX * (1 + e) / e   (e: 궤도 이심률)
+  // 탈출 속도(e→1) 까지 커버하려면 k < 2 * R_MOUNT_PX 필요.
+  // 여유를 두어 1.5배로 제한하면 모든 타원 궤도에서 올바른 방향 보장.
+  const k = Math.min(k_raw, 1.5 * R_MOUNT_PX);
   return R_MOUNT_PX + k * Math.log(rWorld / rMount);
 }
 
@@ -1414,19 +1428,31 @@ function launchSim() {
   sim.elapsed = 0; sim.done = false; sim.result = ''; sim.active = true;
   sim.stats   = { maxAlt:H_MOUNT, maxAltPos:{x:0,y:r0}, impactAngle:0,
                   impactPos:null, flightDist:0, escapeDir:0 };
-  sim._prevPos = { x:0, y:r0 };
+  sim._prevPos    = { x:0, y:r0 };
+  // [Fix 1] 포탄 꼬리용 최근 위치 링 버퍼 — trailLocked 여부와 무관하게 항상 갱신
+  sim.recentPos   = [{ x:0, y:r0, spd:initSpeed }];
+  // 1회 공전 감지 초기화
+  sim.trailLocked  = false;
+  sim._prevAngle   = Math.atan2(r0, 0);
+  sim._totalAngle  = 0;
+  sim._orbitStarted = false;
   // 단계 6: 발사 이펙트 트리거
   triggerLaunchFx();
 }
 
 function resetSim() {
   sim.active = false; sim.done = false; sim.trail = []; sim.elapsed = 0;
+  sim.recentPos = [];  // [Fix 1] 링 버퍼 초기화
   updateHUD(null);
   zoom.target = speedToZoom(initSpeed);
   CAM.tracking = false;
   const W = canvas.clientWidth, H = canvas.clientHeight;
   CAM.smoothOx = W / 2; CAM.smoothOy = H / 2;
   VIEW.ox = W / 2;      VIEW.oy = H / 2;
+  // [Fix 2] 오프스크린 캐시 무효화
+  _trailCacheDirty = true;
+  _trailCacheLen   = 0;
+  _trailCacheZoom  = null;
   // 이펙트 초기화
   particles = [];
   launchFx.active = false; launchFx.recoilActive = false; launchFx.recoilT = 0;
@@ -1462,14 +1488,39 @@ function stepSim() {
     const alt = r - R_EARTH;
     const spd = Math.sqrt(sim.vel.x**2 + sim.vel.y**2);
 
+    // [Fix 1] 최근 위치 링 버퍼 갱신 (trailLocked 무관, 항상 기록)
+    sim.recentPos.push({ x: sim.pos.x, y: sim.pos.y, spd });
+    if (sim.recentPos.length > 12) sim.recentPos.shift();
+
     // 최고 고도 갱신
     if (alt > sim.stats.maxAlt) {
       sim.stats.maxAlt    = alt;
       sim.stats.maxAltPos = { ...sim.pos };
     }
 
-    // 궤적 기록 (밀도 적응형, 최대 12000점)
-    if (sim.trail.length < 12000 && shouldRecordTrail(alt)) {
+    // ── 1회 공전 감지 (누적 각도 변화 추적) ──
+    if (!sim.trailLocked) {
+      const curAngle = Math.atan2(sim.pos.y, sim.pos.x);
+      let dAngle = curAngle - sim._prevAngle;
+      // -π ~ +π 범위로 정규화
+      if (dAngle >  Math.PI) dAngle -= Math.PI * 2;
+      if (dAngle < -Math.PI) dAngle += Math.PI * 2;
+
+      // 공전 방향 확정: 첫 0.5라디안 이후부터 감지 시작
+      if (!sim._orbitStarted && Math.abs(sim._totalAngle) > 0.5) {
+        sim._orbitStarted = true;
+      }
+      sim._totalAngle += dAngle;
+      sim._prevAngle   = curAngle;
+
+      // |누적 각도| >= 2π 이면 1회 공전 완료 → 궤적 잠금
+      if (sim._orbitStarted && Math.abs(sim._totalAngle) >= Math.PI * 2) {
+        sim.trailLocked = true;
+      }
+    }
+
+    // 궤적 기록 (밀도 적응형, 1회 공전까지만)
+    if (!sim.trailLocked && shouldRecordTrail(alt)) {
       sim.trail.push({ x:sim.pos.x, y:sim.pos.y, spd, alt });
     }
 
@@ -1499,8 +1550,8 @@ function stepSim() {
       break;
     }
 
-    // ── 이탈 판정 ──
-    if (r >= R_EARTH * 10) {
+    // ── 이탈 판정 (80 Re: 11.1 km/s 원지점 ~70.7 Re 커버) ──
+    if (r >= R_EARTH * 80) {
       sim.stats.escapeDir = Math.atan2(sim.vel.y, sim.vel.x);
       sim.stats.flightDist = sim.elapsed * (initSpeed * 0.5);  // 근사
       sim.done=true; sim.active=false; sim.result='escape'; break;
@@ -1602,6 +1653,12 @@ function updateHUD(s) {
 // ═══════════════════════════════════════════════════════════════
 //  단계 4: 궤적 렌더링 — 속도 기반 색상 + 고도 기반 두께
 //  단계 5: 착탄 마커 / 이탈 화살표 / 최고고도 마커
+//
+//  [Fix 2] 성능 최적화:
+//   ① worldToScreen 중복 호출 제거: 점당 1회만 계산 후 배열에 캐시
+//   ② N개 개별 stroke() → 색상 버킷별 일괄 stroke() (~20회)
+//   ③ trailLocked 이후: 오프스크린 캔버스에 1회 렌더 후 blit
+//      (카메라 이동량이 임계값 초과 시만 재렌더)
 // ═══════════════════════════════════════════════════════════════
 
 // 속도(m/s) → 궤적 색상
@@ -1615,34 +1672,126 @@ function trailColor(spd, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function drawTrail() {
-  if (!showTrail || sim.trail.length < 2) return;
-  const trail = sim.trail, total = trail.length;
+// ── [Fix 2] 오프스크린 캔버스 (trailLocked 이후 캐싱용) ──
+const _trailCanvas = document.createElement('canvas');
+const _trailCtx    = _trailCanvas.getContext('2d');
+let _trailCacheOx   = null;
+let _trailCacheOy   = null;
+let _trailCacheZoom = null;   // 캐시 생성 시점의 줌 — 줌 변화 시 무효화에 사용
+let _trailCacheLen  = 0;
+let _trailCacheDirty = true;
 
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineCap  = 'round';
+/**
+ * 궤적을 지정된 컨텍스트에 배치 렌더링.
+ * ① worldToScreen N회 (점당 1회, 중복 없음)
+ * ② 색상 버킷 NUM_BUCKETS개로 세그먼트 그룹화 → stroke 호출 최소화
+ */
+function _renderTrailBatched(targetCtx, oxOverride, oyOverride) {
+  const trail = sim.trail, total = trail.length;
+  if (total < 2) return;
+
+  // VIEW를 일시 오버라이드해서 원하는 카메라 위치 기준으로 변환
+  const savedOx = VIEW.ox, savedOy = VIEW.oy;
+  VIEW.ox = oxOverride; VIEW.oy = oyOverride;
+
+  // ① 스크린 좌표 1회 계산
+  const spts = new Array(total);
+  for (let i = 0; i < total; i++) {
+    spts[i] = worldToScreen(trail[i].x, trail[i].y);
+  }
+
+  VIEW.ox = savedOx; VIEW.oy = savedOy;
+
+  // ② 색상 버킷별 세그먼트 그룹화
+  const NUM_BUCKETS = 24;
+  const SPD_MAX = V2 * 1.15;
+  // 버킷: [{ indices[], sumI, sumAlt, spdMid }]
+  const buckets = Array.from({ length: NUM_BUCKETS }, (_, b) => ({
+    indices: [],
+    sumI: 0,
+    sumAlt: 0,
+    spdMid: (b + 0.5) * (SPD_MAX / NUM_BUCKETS),
+  }));
 
   for (let i = 1; i < total; i++) {
-    const p0 = trail[i-1], p1 = trail[i];
-    const s0 = worldToScreen(p0.x, p0.y);
-    const s1 = worldToScreen(p1.x, p1.y);
-
-    const prog  = i / total;
-    const alpha = 0.12 + prog * 0.75;
-
-    // 고도에 따라 두께 변화: 지표 근처 굵게, 우주 얇게
-    const altNorm = Math.min(1, (p1.alt || 0) / (R_EARTH * 2));
-    const lw = 2.5 - altNorm * 1.2;
-    ctx.lineWidth = Math.max(0.8, lw);
-
-    ctx.beginPath();
-    ctx.moveTo(s0.x, s0.y);
-    ctx.lineTo(s1.x, s1.y);
-    ctx.strokeStyle = trailColor(p1.spd || 0, alpha);
-    ctx.stroke();
+    const spd = trail[i].spd || 0;
+    const b = Math.min(NUM_BUCKETS - 1, Math.floor(spd / (SPD_MAX / NUM_BUCKETS)));
+    buckets[b].indices.push(i);
+    buckets[b].sumI   += i;
+    buckets[b].sumAlt += (trail[i].alt || 0);
   }
-  ctx.restore();
+
+  targetCtx.save();
+  targetCtx.lineJoin = 'round';
+  targetCtx.lineCap  = 'round';
+
+  for (let b = 0; b < NUM_BUCKETS; b++) {
+    const { indices, sumI, sumAlt, spdMid } = buckets[b];
+    if (indices.length === 0) continue;
+
+    const n      = indices.length;
+    const avgI   = sumI / n;
+    const avgAlt = sumAlt / n;
+    const prog   = avgI / total;
+    const alpha  = 0.12 + prog * 0.75;
+    const altNorm = Math.min(1, avgAlt / (R_EARTH * 2));
+    const lw     = Math.max(0.8, 2.5 - altNorm * 1.2);
+
+    targetCtx.lineWidth   = lw;
+    targetCtx.strokeStyle = trailColor(spdMid, alpha);
+    targetCtx.beginPath();
+    for (const i of indices) {
+      targetCtx.moveTo(spts[i-1].x, spts[i-1].y);
+      targetCtx.lineTo(spts[i  ].x, spts[i  ].y);
+    }
+    targetCtx.stroke();
+  }
+
+  targetCtx.restore();
+}
+
+function drawTrail() {
+  if (!showTrail || sim.trail.length < 2) return;
+  const total = sim.trail.length;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+
+  if (sim.trailLocked) {
+    // ── trailLocked: 오프스크린 캔버스 캐시 사용 ──
+    const dx = _trailCacheOx   !== null ? VIEW.ox      - _trailCacheOx   : Infinity;
+    const dy = _trailCacheOy   !== null ? VIEW.oy      - _trailCacheOy   : Infinity;
+    // [Bug Fix] zoom 변화 감지 — rToScreen()이 R_SURFACE_PX/R_MOUNT_PX(zoom 의존)를
+    // 사용하므로 zoom이 달라지면 단순 평행이동 blit로 보정 불가 → 반드시 재렌더
+    const dz = _trailCacheZoom !== null ? Math.abs(zoom.current - _trailCacheZoom) : Infinity;
+
+    const needsRedraw = _trailCacheDirty
+      || _trailCacheLen !== total
+      || dz > 0.0008          // 줌이 조금이라도 변하면 재렌더 (비선형 변환이므로 오프셋 보정 불가)
+      || Math.abs(dx) > 150
+      || Math.abs(dy) > 150;
+
+    if (needsRedraw) {
+      // 오프스크린 캔버스 크기 동기화
+      if (_trailCanvas.width !== W || _trailCanvas.height !== H) {
+        _trailCanvas.width  = W;
+        _trailCanvas.height = H;
+      }
+      _trailCtx.clearRect(0, 0, W, H);
+      _renderTrailBatched(_trailCtx, VIEW.ox, VIEW.oy);
+      _trailCacheOx    = VIEW.ox;
+      _trailCacheOy    = VIEW.oy;
+      _trailCacheZoom  = zoom.current;   // [Bug Fix] 줌 레벨 저장
+      _trailCacheLen   = total;
+      _trailCacheDirty = false;
+    }
+
+    // 줌이 안정된 상태에서 카메라 이동만 발생한 경우 → 평행이동 blit
+    ctx.drawImage(_trailCanvas, VIEW.ox - _trailCacheOx, VIEW.oy - _trailCacheOy);
+
+  } else {
+    // ── 궤적 성장 중: 오프스크린 캐시 무효화 후 배치 렌더 ──
+    _trailCacheDirty = true;
+    _renderTrailBatched(ctx, VIEW.ox, VIEW.oy);
+  }
 
   // 최고고도 마커 (비행 중·착탄 후 모두)
   drawMaxAltMarker();
@@ -1763,12 +1912,12 @@ function drawBall() {
   // 비행 완료 후엔 대포알 숨김 (마커가 대신)
   if (sim.done) return;
 
-  const last = sim.trail[sim.trail.length-1];
-  const sp   = worldToScreen(last.x, last.y);
+  // ── Bug 2 수정: trail 기록이 멈춰도 물리 위치(sim.pos)로 렌더 ──
+  const sp   = worldToScreen(sim.pos.x, sim.pos.y);
   const br   = Math.max(4, R_SURFACE_PX * 0.032);
 
   // 속도에 따라 색상 변화
-  const spd  = last.spd || initSpeed;
+  const spd  = Math.sqrt(sim.vel.x**2 + sim.vel.y**2) || initSpeed;
   const t1   = Math.min(1, spd / V1);
   const ballR_inner = `rgb(${Math.round(255*(1-t1)+120*t1)},${Math.round(220*(1-t1)+240*t1)},255)`;
 
@@ -1786,9 +1935,10 @@ function drawBall() {
   glow.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle = glow; ctx.fill();
 
-  // 속도 꼬리 (방향 표시)
-  if (spd > 500 && sim.trail.length > 3) {
-    const tail = sim.trail[Math.max(0, sim.trail.length-6)];
+  // 속도 꼬리 (방향 표시) — [Fix 1] trailLocked 후에도 최신 위치 사용
+  if (spd > 500 && sim.recentPos && sim.recentPos.length > 3) {
+    const recent = sim.recentPos;
+    const tail = recent.length >= 6 ? recent[recent.length - 6] : recent[0];
     const ts   = worldToScreen(tail.x, tail.y);
     ctx.save();
     const tailGrad = ctx.createLinearGradient(ts.x,ts.y,sp.x,sp.y);
@@ -1820,8 +1970,10 @@ function drawGrid() {
     { r: R_EARTH * 2,          label: '1 Re',     dim: false },
     { r: R_EARTH * 3,          label: '2 Re',     dim: false },
     { r: R_EARTH * 5,          label: '4 Re',     dim: false },
-    { r: R_EARTH * 8,          label: '7 Re',     dim: false },
-    { r: R_EARTH * 10,         label: '탈출한계',  dim: false },
+    { r: R_EARTH * 10,         label: '9 Re',     dim: false },
+    { r: R_EARTH * 20,         label: '19 Re',    dim: false },
+    { r: R_EARTH * 40,         label: '39 Re',    dim: false },
+    { r: R_EARTH * 80,         label: '탈출한계',  dim: false },
   ];
 
   for (const ring of rings) {
@@ -1954,7 +2106,10 @@ sSpd2.addEventListener('input', () => {
   }
 });
 
-document.getElementById('chk-trail').addEventListener('change', e => { showTrail = e.target.checked; });
+document.getElementById('chk-trail').addEventListener('change', e => {
+  showTrail = e.target.checked;
+  _trailCacheDirty = true;  // [Fix 2] 체크 변경 시 캐시 무효화
+});
 document.getElementById('chk-grid').addEventListener('change',  e => { showGrid  = e.target.checked; });
 
 document.getElementById('btn-fire').addEventListener('click', () => {
