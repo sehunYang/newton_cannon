@@ -698,6 +698,7 @@ try {
     };
     return {
       ctrl: r('.ctrl-panel'), btn: r('.btn-group'), chk: r('.check-group'), hud: r('.hud'),
+      energy: r('#energy-panel'),
       vh: window.innerHeight, vw: window.innerWidth,
     };
   });
@@ -709,7 +710,23 @@ try {
     `chk ${boxes.chk.bottom.toFixed(0)} ≤ btn ${boxes.btn.top.toFixed(0)}`);
   check('HUD 가 화면 안', boxes.hud.right <= boxes.vw + 1);
   check('통계 패널 숨김(세로 모바일)', !(await page.locator('#hud-stats').isVisible()));
-  check('에너지 그래프 숨김(세로 모바일)', !(await page.locator('#energy-panel').isVisible()));
+  // 에너지 그래프: HUD 아래 · 체크박스 위의 빈 띠에 가로로 (mobileLayout 이 배치)
+  check('에너지 그래프 표시(세로 모바일)', await page.locator('#energy-panel').isVisible());
+  check('그래프가 HUD 아래', boxes.energy.top >= boxes.hud.bottom - 1,
+    `energy ${boxes.energy.top.toFixed(0)} ≥ hud ${boxes.hud.bottom.toFixed(0)}`);
+  check('그래프가 체크박스 위', boxes.energy.bottom <= boxes.chk.top + 1,
+    `energy ${boxes.energy.bottom.toFixed(0)} ≤ chk ${boxes.chk.top.toFixed(0)}`);
+  check('그래프가 화면 가로 안', boxes.energy.left >= 0 && boxes.energy.right <= boxes.vw + 1,
+    `${boxes.energy.left.toFixed(0)}~${boxes.energy.right.toFixed(0)} / ${boxes.vw}`);
+  const mobileInk = await page.evaluate(() => {
+    const c = document.getElementById('energy-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let ink = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 20) ink++;
+    return { ink: ink / (d.length / 4), w: c.width };
+  });
+  check('모바일 폭에 맞춰 캔버스 재계산', mobileInk.w > 250, `${mobileInk.w}px`);
+  check('모바일에서도 그래프가 그려짐', mobileInk.ink > 0.02, `잉크 ${(mobileInk.ink * 100).toFixed(1)}%`);
   const vpW = await page.evaluate(() => window.__cannon.vp.width);
   check('캔버스 리사이즈 반영', Math.abs(vpW - 390) < 2, String(vpW));
 

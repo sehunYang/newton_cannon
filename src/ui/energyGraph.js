@@ -20,7 +20,9 @@ import { els } from './dom.js';
 const MAX_POINTS = 240;
 
 const COLOR = { k: '#ffa040', u: '#3a8eff', e: '#7ef0c8' };
-const PAD = { l: 8, r: 8, t: 14, b: 14 };
+/** 좌우 여백은 고정, 위아래는 캔버스가 낮을수록 줄입니다(작은 폰에서 곡선이 눌리지 않게) */
+const PAD_X = 8;
+const padY = (h) => Math.max(9, Math.min(14, h * 0.14));
 
 const toMJ = (v) => v / 1e6;
 const fmtMJ = (v) => `${toMJ(v).toFixed(1)}`;
@@ -103,10 +105,11 @@ export class EnergyGraph {
 
     const t0 = pts[0].t;
     const t1 = Math.max(pts[pts.length - 1].t, t0 + 1e-6);
-    const plotW = w - PAD.l - PAD.r;
-    const plotH = h - PAD.t - PAD.b;
-    const X = (t) => PAD.l + ((t - t0) / (t1 - t0)) * plotW;
-    const Y = (v) => PAD.t + ((hi - v) / (hi - lo)) * plotH;
+    const pad = padY(h);
+    const plotW = w - PAD_X * 2;
+    const plotH = h - pad * 2;
+    const X = (t) => PAD_X + ((t - t0) / (t1 - t0)) * plotW;
+    const Y = (v) => pad + ((hi - v) / (hi - lo)) * plotH;
 
     // ── 0 선 ──
     const y0 = Y(0);
@@ -114,8 +117,8 @@ export class EnergyGraph {
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
-    ctx.moveTo(PAD.l, y0);
-    ctx.lineTo(w - PAD.r, y0);
+    ctx.moveTo(PAD_X, y0);
+    ctx.lineTo(w - PAD_X, y0);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -123,7 +126,7 @@ export class EnergyGraph {
     ctx.fillStyle = 'rgba(120,160,210,0.6)';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
-    ctx.fillText('0', PAD.l, y0 - 1);
+    ctx.fillText('0', PAD_X, y0 - 1);
 
     // ── 세 곡선 ──
     for (const key of ['u', 'k', 'e']) {
@@ -152,11 +155,11 @@ export class EnergyGraph {
     ctx.fillStyle = 'rgba(90,122,160,0.75)';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(`${toMJ(hi).toFixed(0)}`, PAD.l, 2);
+    ctx.fillText(`${toMJ(hi).toFixed(0)}`, PAD_X, 1);
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${toMJ(lo).toFixed(0)}`, PAD.l, h - 2);
+    ctx.fillText(`${toMJ(lo).toFixed(0)}`, PAD_X, h - 1);
     ctx.textAlign = 'right';
-    ctx.fillText(fmtTime(t1), w - PAD.r, h - 2);
+    ctx.fillText(fmtTime(t1), w - PAD_X, h - 1);
 
     this.#setLegend(now);
   }

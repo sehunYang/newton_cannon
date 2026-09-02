@@ -101,7 +101,7 @@ export class App {
     this.hud.showIdle(this.config);
 
     // 컨트롤 패널의 실제 높이가 잡힌 뒤에 모바일 레이아웃을 계산해야 합니다
-    requestAnimationFrame(() => updateMobileLayout());
+    requestAnimationFrame(() => updateMobileLayout(() => this.energy.resize()));
     this.loop.start();
   }
 
@@ -110,7 +110,8 @@ export class App {
     this.vp.resize(width, height);
     this.energy.resize();
     positionSpeedMarkers();
-    updateMobileLayout();
+    // 모바일에서는 패널 폭이 배치 후에 정해지므로 배치가 끝난 뒤 백버퍼를 다시 잡습니다
+    updateMobileLayout(() => this.energy.resize());
     this.bus.emit(EV.RESIZED, { width, height });
   }
 

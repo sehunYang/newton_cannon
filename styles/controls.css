@@ -94,10 +94,11 @@ input[type=range]:hover::-webkit-slider-thumb  { transform:scale(1.15); }
 /* ── 체크박스 ── */
 .check-group {
   position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
-  display:flex; gap:20px; pointer-events:all;
+  display:flex; flex-wrap:wrap; gap:20px; pointer-events:all;
+  /* 라벨은 단어 중간에서 끊지 않고(check-item 의 nowrap), 항목 단위로 줄바꿈합니다 */
 }
 .check-item {
-  display:flex; align-items:center; gap:8px; cursor:pointer;
+  display:flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;
   font-size:13px; color:var(--dim); user-select:none; transition:color 0.15s;
 }
 .check-item:hover { color:var(--text); }

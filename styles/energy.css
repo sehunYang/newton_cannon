@@ -8,6 +8,8 @@
   pointer-events:none; /* 그래프는 읽기 전용 — 뒤의 캔버스 조작을 막지 않습니다 */
 }
 .energy-panel.hidden { display:none; }
+/* 모바일 세로에서 세로 공간이 부족할 때 (mobileLayout.js) */
+.energy-panel.no-room { display:none; }
 
 .energy-title {
   font-family:'Space Mono',monospace; font-size:10px;
