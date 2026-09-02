@@ -1,0 +1,15 @@
+/* ═══════════════════════════════════════════════════════════════
+   스타일 엔트리포인트
+   ---------------------------------------------------------------
+   순서가 곧 캐스케이드 우선순위입니다. 새 컴포넌트 CSS는
+   responsive.css '앞'에 추가하세요 (반응형이 항상 마지막에 덮어씀).
+
+   폰트(@import)는 index.html 의 <link rel=preload/stylesheet> 로
+   옮겼습니다 — CSS @import 는 렌더 블로킹 체인이 길어집니다.
+   ═══════════════════════════════════════════════════════════════ */
+@import url('./tokens.css');
+@import url('./base.css');
+@import url('./layout.css');
+@import url('./hud.css');
+@import url('./controls.css');
+@import url('./responsive.css');

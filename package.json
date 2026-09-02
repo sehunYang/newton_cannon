@@ -1,0 +1,17 @@
+{
+  "name": "newtons-cannon",
+  "version": "2.0.0",
+  "description": "뉴턴의 대포 — 중력장 운동 학습용 궤도 시뮬레이터",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.js",
+    "check": "node scripts/check-syntax.js",
+    "test": "node scripts/smoke-test.js",
+    "test:browser": "node scripts/browser-test.js",
+    "docs:shots": "node scripts/capture-docs.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

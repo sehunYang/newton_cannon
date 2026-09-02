@@ -1,0 +1,46 @@
+/* 우상단 텔레메트리 HUD */
+
+/* ── HUD ── */
+.hud {
+  position:absolute; top:22px; right:22px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:14px; padding:16px 20px; min-width:230px;
+  backdrop-filter:blur(16px); box-shadow:0 4px 32px rgba(0,0,0,0.4);
+  transition: border-color 0.3s;
+}
+.hud.impact { border-color: rgba(255,80,40,0.5); }
+.hud.orbit  { border-color: rgba(58,142,255,0.5); }
+.hud.escape { border-color: rgba(126,240,200,0.5); }
+
+.hud-title {
+  font-family:'Space Mono',monospace; font-size:11px;
+  letter-spacing:0.28em; color:var(--accent); text-transform:uppercase;
+  margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;
+  display:flex; align-items:center; gap:8px;
+}
+.hud-title::before { content:''; width:6px; height:6px; border-radius:50%;
+  background:var(--accent); box-shadow:0 0 8px var(--accent);
+  animation: pulse-dot 2s infinite; }
+@keyframes pulse-dot {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:0.4; transform:scale(0.7); }
+}
+.hud-row { display:flex; justify-content:space-between; align-items:center; margin:6px 0; }
+.hud-label { font-size:13px; color:var(--dim); }
+.hud-value { font-family:'Space Mono',monospace; font-size:14px; color:var(--accent2); }
+
+/* 궤도 유형 배지 */
+.orbit-badge {
+  display:inline-block; font-family:'Space Mono',monospace; font-size:12px;
+  padding:3px 10px; border-radius:20px; font-weight:700;
+  letter-spacing:0.06em; transition: all 0.4s;
+}
+.orbit-badge.fall   { background:rgba(255,160,64,0.15); color:#ffa040; border:1px solid rgba(255,160,64,0.3); }
+.orbit-badge.orbit2 { background:rgba(58,142,255,0.15); color:#3a8eff; border:1px solid rgba(58,142,255,0.3); }
+.orbit-badge.escape2{ background:rgba(126,240,200,0.15);color:#7ef0c8; border:1px solid rgba(126,240,200,0.3);}
+.orbit-badge.impact2{ background:rgba(255,80,40,0.15); color:#ff6040; border:1px solid rgba(255,80,40,0.3); }
+.orbit-badge.idle   { background:rgba(90,122,160,0.1); color:#5a7aa0; border:1px solid rgba(90,122,160,0.2); }
+
+/* 통계 섹션 */
+#hud-stats { transition: all 0.3s; }
+.stat-divider { border:none; border-top:1px solid var(--border); margin:10px 0 8px; }

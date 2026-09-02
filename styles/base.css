@@ -1,0 +1,11 @@
+/* 리셋 + 문서 뼈대 */
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text);
+       font-family:'Noto Sans KR',sans-serif;
+       overflow:hidden;
+       width:100vw;
+       height:100vh; height:100dvh; }   /* dvh: 브라우저 UI 제외 실제 높이 */
+#wrap { position:relative; width:100%; height:100%; }
+canvas { display:block; width:100%; height:100%; }
+.ui { position:absolute; inset:0; pointer-events:none; }
