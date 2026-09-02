@@ -177,13 +177,12 @@ try {
   await page.waitForTimeout(200);
   const bg8k = await page.locator('#s-spd').evaluate((e) => e.style.background);
   check('슬라이더 트랙 = 궤도색(파랑)', bg8k.includes('rgb(58, 142, 255)'));
-  // 실제 축척에서는 8 km/s 궤도(원지점 1.05 Re)가 줌 1 에 다 들어옵니다.
-  // 10 km/s(원지점 4 Re)로 올리면 타원 전체가 보이도록 물러나야 합니다.
+  // 실제 축척은 발사 전에 미리 물러나지 않습니다 — 카메라가 발사 후 포탄을 따라갑니다.
   check('실제 축척이 기본', (await state()).display.trueScale === true);
   await setSlider('#s-spd', 10000);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(800);
   const zoom10k = (await state()).zoom;
-  check('원지점(4 Re)에 맞춰 줌 아웃', zoom10k < 0.6 && zoom10k > 0.3, `zoom ${zoom10k.toFixed(2)}`);
+  check('발사 전에는 줌 1 유지', zoom10k > 0.99, `zoom ${zoom10k.toFixed(2)}`);
 
   await setSlider('#s-spd', 11500);
   await page.waitForTimeout(250);
@@ -403,11 +402,42 @@ try {
   await page.waitForTimeout(400);
   await setSlider('#s-spd', 10000);
   await page.waitForTimeout(600);
-  await page.keyboard.press('4');
+  // ×128 이면 이 궤도(주기 5.5 h)가 1.3 초 만에 끝나 카메라 보간이 못 따라갑니다.
+  // 추적 검사는 ×32 로 하고, 측정 뒤 ×128 로 마저 돌립니다.
+  await page.keyboard.press('3');
   await page.keyboard.press('Space');
+
+  /** 포탄의 화면 위치·줌·지구 가시성 */
+  const camState = () => page.evaluate(() => {
+    const a = window.__cannon, vp = a.vp, s = a.router.current.sim;
+    const b = vp.worldToScreen(s.pos.x, s.pos.y);
+    const R = vp.rSurfacePx * 1.15;
+    const nx = Math.max(0, Math.min(vp.width, vp.ox)), ny = Math.max(0, Math.min(vp.height, vp.oy));
+    return {
+      offX: b.x - vp.width / 2, offY: b.y - vp.height / 2,
+      zoom: vp.zoom.current, rRe: s.radius / 6.371e6,
+      earthOffscreen: Math.hypot(vp.ox - nx, vp.oy - ny) > R,
+      camAtEarth: Math.abs(vp.ox - vp.width / 2) < 4 && Math.abs(vp.oy - vp.height / 2) < 4,
+    };
+  });
+
+  // 비행 중: 카메라는 포탄을 따라가고, 줌은 √ 법칙으로 조금만 물러납니다
+  await page.waitForFunction(() => window.__cannon.router.current.sim.radius > 3.5 * 6.371e6,
+    null, { timeout: 30000 });
+  const mid = await camState();
+  check('비행 중 카메라가 포탄을 추적 (화면 중앙 ±40 px)',
+    Math.hypot(mid.offX, mid.offY) < 40, `오프셋 ${Math.hypot(mid.offX, mid.offY).toFixed(0)} px`);
+  const zExp = Math.sqrt(1.5 / mid.rRe);
+  check('추적 줌 = √(1.5 Re / r) 근방', Math.abs(mid.zoom - zExp) < 0.06,
+    `zoom ${mid.zoom.toFixed(2)} (기대 ${zExp.toFixed(2)}, r ${mid.rRe.toFixed(1)} Re)`);
+  await shot('06a-추적카메라');
+  await page.keyboard.press('4');
+
+  // 한 바퀴를 다 돌면 지구를 중앙에 두고 타원 전체가 보이게 물러납니다
   await page.waitForFunction(() => window.__cannon.router.current.sim.trail.locked,
     null, { timeout: 40000 });
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(2500);
+  check('1회 공전 후 지구 중앙 복귀', (await camState()).camAtEarth);
 
   /**
    * 화면에 찍힌 궤적 점이 "지구 중심을 초점으로 하는 원뿔곡선" 위에 있는지 잽니다.
@@ -469,6 +499,53 @@ try {
   await page.keyboard.press('l');
   await page.waitForTimeout(400);
   check('L → 실제 축척 복귀', (await shapeCheck()).projection === 'radial-linear');
+
+  // ═══ [5c] 탈출 속도 미만의 먼 타원 — 지구 위치 표시창 + 에너지 기준 탈출 판정 ═══
+  console.log('\n[5c] 11000 m/s, 0° — 원지점 30.6 Re 타원');
+  await page.keyboard.press('r');
+  await page.waitForTimeout(400);
+  await setSlider('#s-spd', 11000);
+  await page.waitForTimeout(500);
+  await page.keyboard.press('4');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__cannon.router.current.sim.radius > 20 * 6.371e6,
+    null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const far = await camState();
+  check('20 Re 에서 지구는 화면 밖', far.earthOffscreen, `r ${far.rRe.toFixed(1)} Re, zoom ${far.zoom.toFixed(2)}`);
+  check('포탄은 여전히 화면 중앙', Math.hypot(far.offX, far.offY) < 40,
+    `오프셋 ${Math.hypot(far.offX, far.offY).toFixed(0)} px`);
+  // 지구 위치 표시창: 지구 방향(여기서는 위쪽) 가장자리에, 미니 지구가 그려져야 함
+  const locator = await page.evaluate(() => {
+    const a = window.__cannon, vp = a.vp;
+    const L = a.router.current.layers.find((l) => l.name === 'earthLocator').last;
+    if (!L) return null;
+    const px = Math.round(L.x), py = Math.round(L.y);
+    const dpr = window.devicePixelRatio || 1;
+    const d = document.getElementById('c').getContext('2d').getImageData(px * dpr, py * dpr, 1, 1).data;
+    // 창(라벨 포함)이 UI 오버레이와 겹치는가
+    const pad = L.r + 13;
+    const overlaps = [...document.querySelectorAll('.ui > *')].filter((el) => {
+      const b = el.getBoundingClientRect();
+      return b.width > 0 && px - pad < b.right && px + pad > b.left && py - pad - 28 < b.bottom && py + pad + 28 > b.top;
+    }).map((el) => el.className);
+    return { px, py, rgb: [d[0], d[1], d[2]], top: py < vp.height / 2, overlaps };
+  });
+  check('지구 위치 표시창이 그려짐', !!locator);
+  if (locator) {
+    check('창은 지구가 있는 위쪽 가장자리에', locator.top, `(${locator.px},${locator.py})`);
+    check('창 가운데에 미니 지구 (푸른 픽셀)', locator.rgb[2] > 120 && locator.rgb[2] > locator.rgb[0],
+      `rgb ${locator.rgb.join(',')}`);
+    check('창이 타이틀·HUD 등 UI 와 겹치지 않음', locator.overlaps.length === 0, locator.overlaps.join(', '));
+  }
+  await shot('06d-지구위치표시');
+
+  // 30 Re(탈출 확정 거리)를 넘어도 에너지가 음수면 탈출이 아닙니다
+  await page.waitForFunction(() => window.__cannon.router.current.sim.radius > 30.2 * 6.371e6,
+    null, { timeout: 60000 });
+  const beyond = await state();
+  check('30 Re 를 넘어도 속박 궤도라 비행 계속', beyond.active && !beyond.done, `outcome=${beyond.outcome}`);
+  check('배지는 여전히 타원 궤도', (await text('#hud-orbit')) === '타원/원 궤도', await text('#hud-orbit'));
 
   // ═══ [6] 키보드 단축키 ═══
   console.log('\n[6] 키보드 단축키');

@@ -1,4 +1,4 @@
-import { R_EARTH, ESCAPE_RADIUS } from '../core/constants.js';
+import { R_EARTH, GM, ESCAPE_RADIUS } from '../core/constants.js';
 import { pointMassGravity } from '../physics/gravity.js';
 import { velocityVerlet } from '../physics/integrators.js';
 
@@ -61,7 +61,9 @@ export function predictTrajectory({ pos, vel }, {
       impactPos = { x: px * k, y: py * k };
       break;
     }
-    if (r >= escapeRadius) break;
+    // 시뮬레이터와 같은 기준: 멀리 갔고 + 속박되지 않았을 때만 탈출
+    if (r >= escapeRadius
+        && (state.vel.x ** 2 + state.vel.y ** 2) / 2 - GM / r >= 0) break;
   }
 
   return {

@@ -46,7 +46,7 @@ src/
   sim/                ProjectileSim · Trail · FlightResult · launchState · predict
   render/             Renderer · Viewport · Camera · palette · zoomPolicy
     projections/      반지름 매핑 (화면 성격을 결정하는 핵심 축)
-    layers/           15개 레이어 — 각자 그리기만 함
+    layers/           16개 레이어 — 각자 그리기만 함
     surfaceView.js    지표면 화면 기하 헬퍼
   fx/                 파티클 · 발사 이펙트 · 폭발 이펙트
   ui/                 dom · hud · controls · hotkeys · mobileLayout
@@ -109,18 +109,37 @@ EventBus ──► App  (유일한 상태 소유자: config / display)
 
 ### 궤도 모드의 두 투영과 줌 정책
 
-`RadialLogProjection` 은 지표 근처는 선형, 먼 곳은 로그로 눌러 80 Re 탈출까지 한 화면에
+`RadialLogProjection` 은 지표 근처는 선형, 먼 곳은 로그로 눌러 80 Re 까지 한 화면에
 담지만, 반지름을 비선형으로 바꾸므로 **타원이 타원으로 보이지 않습니다**(원지점/근지점 화면 비율
 3.08 vs 실제 4.01, 초점이 지구에서 벗어남). 물리는 정확한데 그림이 틀리는 상황이라
 `RadialLinearProjection` (`rPx = rSurfacePx · r / R_EARTH`)을 기본으로 두고, 로그 투영은
 `display.trueScale=false` 일 때만 씁니다. `OrbitalMode.syncProjection` 이 매 프레임 `display` 와
 비교해 갈아끼우고 궤적 캐시를 비웁니다.
 
-줌은 투영에 따라 다릅니다(`render/zoomPolicy.js`).
-- 압축 보기: `speedToZoom(initSpeed)` / 비행 중 `altToZoom(r)` 과의 min.
-- 실제 축척: 발사 조건으로 궤도 요소를 구해 **원지점이 화면의 90% 안에 들어오는 줌**
-  (`fitZoomForOrbit`)을 발사 순간 확정해 두고, 속박 궤도면 그대로 유지(타원이 흔들리지 않게),
-  탈출 궤도면 `fitZoomForRadius(r·1.05)` 로 포탄을 따라 계속 물러납니다.
+줌·카메라는 투영에 따라 다릅니다(`render/zoomPolicy.js`, `OrbitalMode.policyZoom`).
+- 압축 보기: `speedToZoom(initSpeed)` / 비행 중 `altToZoom(r)` 과의 min. 카메라는 화면 밖 clamp.
+- 실제 축척 — 세 단계로 나뉩니다.
+  1. 발사 전: 줌 1, 지구 중앙.
+  2. 비행 중: **카메라가 포탄을 따라가고** 줌은 `followZoom(r) = min(1, √(1.5 Re / r))`.
+     궤도 전체를 미리 넣지 않고 거리의 제곱근으로만 물러나서 "떠나는 느낌"을 남깁니다.
+     clamp 는 끄므로 지구가 화면 밖으로 나갈 수 있고, 그때 `earthLocator` 레이어가
+     지구 방향 가장자리에 둥근 창(미니 지구 + 거리)을 띄웁니다. 창이 DOM 오버레이(타이틀·HUD·패널)와
+     겹치면 같은 가장자리를 따라 비켜섭니다(`.ui > *` 의 사각형을 읽음).
+  3. 한 바퀴를 돌아 궤적이 잠기면(`trail.locked`) 지구를 중앙에 두고 `fitZoomForOrbit` 으로
+     **타원 전체**(원지점이 화면의 80% 안)를 보여 줍니다. 착탄·탈출 뒤에는 `fitZoomForRadius(R_EARTH + maxAlt)`.
+
+  추적 카메라(`Camera.update`)는 대상의 프레임당 이동량을 그대로 실어 나르고 **오프셋만** lerp 합니다
+  (feed-forward). 단순 lerp 는 정상 상태에서도 속도에 비례한 지연이 남아 ×128 근지점에서 포탄이
+  화면 중앙을 수백 px 벗어났습니다. 파티클(`fx/ParticleSystem`)도 같은 이유로 월드 기준점 +
+  화면 오프셋으로 바꿔, 카메라가 달려가도 발사 연기가 발사대에 붙어 있고 줌에 맞춰 줄어듭니다.
+
+### 탈출 판정
+
+탈출은 거리가 아니라 **에너지 부호**(`ProjectileSim.unbound`: v²/2 − GM/r ≥ 0)로 정합니다.
+`ESCAPE_RADIUS`(30 Re)는 "속박이 아닌 포탄의 시뮬레이션을 어디서 끝낼지"일 뿐이라, 탈출속도 바로
+아래인 11,150 m/s(원지점 ≈ 194 Re, 주기 ≈ 59 일)도 반드시 돌아옵니다. 그런 긴 타원이 궤적 점을
+폭발적으로 쌓지 않도록 `Trail` 은 먼 우주에서 반지름의 0.3% 이상 움직였을 때만 점을 찍습니다
+(스모크 테스트 `[5b]` 가 199 Re 왕복을 3,900 점 정도로 검증).
 
 ### 시간 처리
 

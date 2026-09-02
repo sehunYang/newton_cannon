@@ -25,12 +25,11 @@ function drawContinents(ctx, cx, cy, R) {
   ctx.restore();
 }
 
-/** 지구 본체: 대기 글로우 → 바다 → 대륙 → 테두리 → 하이라이트 */
-export const earthLayer = {
-  name: 'earth',
-  draw({ ctx, vp }) {
-    const cx = vp.ox, cy = vp.oy, R = vp.rSurfacePx;
-
+/**
+ * 지구 본체를 임의의 위치·반지름으로 그립니다: 대기 글로우 → 바다 → 대륙 → 테두리 → 하이라이트.
+ * 본 화면의 지구와 earthLocator 의 미니 지구가 같은 그림을 씁니다.
+ */
+export function drawEarthBody(ctx, cx, cy, R) {
     const atm = ctx.createRadialGradient(cx, cy, R * 0.95, cx, cy, R * 1.22);
     atm.addColorStop(0, 'rgba(60,140,255,0.28)');
     atm.addColorStop(0.5, 'rgba(40,100,200,0.09)');
@@ -65,5 +64,11 @@ export const earthLayer = {
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
     ctx.fillStyle = hl;
     ctx.fill();
+}
+
+export const earthLayer = {
+  name: 'earth',
+  draw({ ctx, vp }) {
+    drawEarthBody(ctx, vp.ox, vp.oy, vp.rSurfacePx);
   },
 };

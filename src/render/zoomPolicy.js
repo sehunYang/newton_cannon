@@ -13,9 +13,11 @@ import { orbitalElements } from '../physics/orbit.js';
  *  매 프레임 둘 중 **더 넓은 시야**(작은 값)를 택합니다.
  *
  * ▸ 선형 투영(실제 축척)
- *  - fitZoomForOrbit : 초기 상태로 궤도 요소를 구해 **원지점까지 통째로** 들어오는
- *                      줌을 고릅니다. 타원 전체가 한 화면에 있어야 "타원"으로 보입니다.
- *  - fitZoomForRadius: 탈출 궤도처럼 원지점이 없는 경우, 현재 거리에 맞춰 물러납니다.
+ *  - followZoom      : 비행 중. 카메라가 포탄을 따라가며 거리에 따라 **조금씩만** 물러납니다.
+ *                      지구가 시야에서 벗어나면 earthLocator 레이어가 방향을 알려줍니다.
+ *  - fitZoomForOrbit : 한 바퀴를 다 돌면 지구를 중앙에 두고 **타원 전체**가 보이게 물러납니다.
+ *                      (이때 비로소 "지구가 초점인 타원"이 한눈에 들어옵니다)
+ *  - fitZoomForRadius: 착탄·탈출 뒤 궤적 전체(최고 고도까지)가 들어오는 결과 화면.
  */
 
 export function speedToZoom(v) {
@@ -41,6 +43,18 @@ export function altToZoom(r) {
 const FIT_FRACTION = 0.8; // 아래쪽 체크박스 바·HUD 를 피해 원지점이 놓이도록
 /** 원지점이 지표 근처인 낮은 발사에서도 지구가 화면을 넘지 않게 */
 const MAX_ZOOM = 1.0;
+
+/** 추적 카메라: 이 거리(Re)까지는 줌 1, 그 너머는 √ 로 완만하게 물러남 */
+const FOLLOW_REF = 1.5;
+
+/**
+ * 비행 중 추적 줌. z = min(1, √(1.5 Re / r)) — 4 Re 에서 0.61, 30 Re 에서 0.22.
+ * 거리에 비례해 물러나면(fit) 포탄이 화면에서 움직이지 않는 것처럼 보이고,
+ * 아예 안 물러나면 궤적의 곡률을 읽을 수 없어 그 중간을 택했습니다.
+ */
+export function followZoom(r) {
+  return Math.min(MAX_ZOOM, Math.sqrt((FOLLOW_REF * R_EARTH) / Math.max(r, R_EARTH)));
+}
 
 /**
  * 반지름 r(m)이 화면 안에 들어오는 줌.

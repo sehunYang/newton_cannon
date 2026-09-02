@@ -7,8 +7,8 @@
  */
 export const particlesLayer = {
   name: 'particles',
-  draw({ ctx, fx }) {
-    fx.particles.updateAndDraw(ctx);
+  draw({ ctx, fx, vp }) {
+    fx.particles.updateAndDraw(ctx, vp);
   },
 };
 

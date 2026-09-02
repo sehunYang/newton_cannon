@@ -1,10 +1,11 @@
 /**
  * 파티클 시스템 (발사 불꽃 · 연기 · 폭발 · 파편).
  *
- * 파티클은 스폰 순간에 월드→화면 변환을 한 번만 하고, 그 뒤로는 **화면 좌표**에서
- * 움직입니다. 수명이 1~2초로 짧아 카메라 이동의 영향이 거의 없기 때문입니다.
- * (worldX/worldY 를 함께 저장해 두었으니, 나중에 카메라 보정이 필요해지면
- *  update 에서 화면 좌표를 다시 계산하도록 바꾸면 됩니다.)
+ * 파티클은 **월드 좌표의 기준점** 하나와, 거기서부터의 **화면 픽셀 오프셋**으로 움직입니다.
+ * 매 프레임 기준점을 다시 투영하므로 카메라가 포탄을 따라 달려가도 발사 연기는
+ * 발사대에 붙어 있고, 줌이 바뀌면 크기도 그에 맞춰 줄어듭니다.
+ * (화면 픽셀에서 움직이는 이유: 연기·불꽃의 퍼짐은 물리량이 아니라 연출이라
+ *  줌과 무관하게 같은 속도로 보이는 게 자연스럽습니다.)
  *
  * 새 파티클 종류를 추가하려면 RENDERERS 에 항목 하나만 추가하세요.
  */
@@ -65,7 +66,6 @@ export class ParticleSystem {
    * @param {Viewport} vp
    */
   spawn(type, vp, worldX, worldY, count, options = {}) {
-    const sp = vp.worldToScreen(worldX, worldY);
     for (let i = 0; i < count; i++) {
       if (this.items.length >= this.max) break;
       const angle = Math.random() * Math.PI * 2;
@@ -74,8 +74,9 @@ export class ParticleSystem {
         : 1 + Math.random() * 3;
       this.items.push({
         type,
-        x: sp.x + (Math.random() - 0.5) * (options.spread || 4),
-        y: sp.y + (Math.random() - 0.5) * (options.spread || 4),
+        // 기준점(worldX, worldY)으로부터의 화면 오프셋 (px)
+        x: (Math.random() - 0.5) * (options.spread || 4),
+        y: (Math.random() - 0.5) * (options.spread || 4),
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         life: 1,
@@ -83,11 +84,13 @@ export class ParticleSystem {
         size: options.size ? options.minSize + Math.random() * options.size : 2 + Math.random() * 4,
         gravity: options.gravity || 0,
         worldX, worldY,
+        uiScale0: vp.uiScale, // 스폰 당시 줌 — 이후 줌 아웃하면 그 비율만큼 축소
       });
     }
   }
 
-  updateAndDraw(ctx) {
+  /** @param {Viewport} vp 기준점을 다시 투영할 뷰포트 */
+  updateAndDraw(ctx, vp) {
     ctx.save();
     for (let i = this.items.length - 1; i >= 0; i--) {
       const p = this.items[i];
@@ -96,7 +99,13 @@ export class ParticleSystem {
       p.vy += p.gravity;
       p.life -= p.decay;
       if (p.life <= 0) { this.items.splice(i, 1); continue; }
+      const anchor = vp.worldToScreen(p.worldX, p.worldY);
+      const k = Math.min(1, vp.uiScale / p.uiScale0);
+      ctx.save();
+      ctx.translate(anchor.x, anchor.y);
+      ctx.scale(k, k);
       RENDERERS[p.type]?.(ctx, p, Math.max(0, p.life));
+      ctx.restore();
     }
     ctx.restore();
   }

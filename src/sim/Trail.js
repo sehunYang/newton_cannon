@@ -69,7 +69,12 @@ export class Trail {
     if (alt < H_MOUNT * 20) return true;
     if (alt < R_EARTH * 0.5) return this.#counter % 2 === 0;
     if (alt < R_EARTH * 2) return this.#counter % 4 === 0;
-    return this.#counter % 8 === 0;
+    // 먼 우주: 반지름의 0.3% 이상 움직였을 때만. 원지점 194 Re 짜리 타원(11.15 km/s)은
+    // 스텝 수로 솎으면 수십만 점이 쌓이지만 이 기준이면 수천 점이고, 화면에서
+    // r 이 수백~수천 px 이므로 점 간격은 여전히 몇 px 이내입니다.
+    const last = this.points[this.points.length - 1];
+    if (!last) return true;
+    return Math.hypot(x - last.x, y - last.y) >= Math.hypot(x, y) * 0.003;
   }
 
   /**

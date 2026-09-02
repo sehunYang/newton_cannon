@@ -79,7 +79,7 @@ const check = (name, cond, extra = '') =>
 console.log('\n[1] 부팅');
 check('기본 모드는 orbital', app.router.current.id === 'orbital');
 check('지표면 모드 등록됨', !!app.router.get('surface'));
-check('레이어 12개 등록', app.router.current.layers.length === 12, String(app.router.current.layers.length));
+check('레이어 13개 등록', app.router.current.layers.length === 13, String(app.router.current.layers.length));
 check('뷰포트 크기 반영', app.vp.width === 1200 && app.vp.height === 800);
 
 /** dt=1/60 로 n 프레임 진행 */
@@ -140,6 +140,8 @@ check('궤도 모드 유지 (라우팅 안 됨)', app.router.current.id === 'orb
 check('아직 비행 중', s2.active && !s2.done, `고도 ${(s2.altitude / 1000).toFixed(0)} km`);
 check('1회 공전 후 궤적 잠금', s2.trail.locked, `점 ${s2.trail.points.length}개`);
 
+const { createLaunchState } = await import('../src/sim/launchState.js');
+
 console.log('\n[5] 탈출 속도 (11500 m/s) → 탈출 판정');
 app.reset();
 app.config.initSpeed = 11500; app.config.angleDeg = 45; app.config.timeScale = 128;
@@ -147,8 +149,26 @@ app.launch();
 for (let i = 0; i < 20000 && !app.router.current.sim.done; i++) app.frame(1 / 60, i);
 check('탈출로 종료', app.router.current.sim.outcome === 'escape', app.router.current.sim.outcome);
 
+console.log('\n[5b] 탈출 속도 미만 (11150 m/s) → 194 Re 까지 갔다가 반드시 돌아옴');
+{
+  const { ProjectileSim } = await import('../src/sim/ProjectileSim.js');
+  const { Trail } = await import('../src/sim/Trail.js');
+  const { R_EARTH } = await import('../src/core/constants.js');
+  const sim = new ProjectileSim({ trail: new Trail() });
+  sim.launch(createLaunchState({ angleDeg: 0, initSpeed: 11150 }));
+  let maxR = 0, steps = 0;
+  const t0 = Date.now();
+  while (!sim.done && !sim.trail.locked && steps < 4e6) {
+    sim.advance(1000); steps += 1000;
+    maxR = Math.max(maxR, sim.radius);
+  }
+  check('탈출로 판정되지 않음', sim.outcome !== 'escape', sim.outcome ?? '비행 중');
+  check('원지점이 탈출 확정 거리(30 Re)를 훌쩍 넘음', maxR > R_EARTH * 150, `${(maxR / R_EARTH).toFixed(0)} Re`);
+  check('1회 공전을 마치고 돌아옴', sim.trail.locked, `${(sim.elapsed / 86400).toFixed(1)}일, ${Date.now() - t0} ms`);
+  check('먼 우주 궤적 점이 과하게 쌓이지 않음', sim.trail.points.length < 20000, `점 ${sim.trail.points.length}개`);
+}
+
 console.log('\n[6] 라우팅 판정');
-const { createLaunchState } = await import('../src/sim/launchState.js');
 const surface = app.router.get('surface');
 check('저속 발사는 지표면 모드가 받음',
   surface.accepts(createLaunchState({ angleDeg: 45, initSpeed: 3000 })));

@@ -6,6 +6,10 @@
  *
  * 카메라가 이동해도 투영은 그대로이므로, 화면 밖으로 지구가 완전히
  * 사라지지 않게 clamp 를 겁니다(학생이 방향 감각을 잃지 않도록).
+ *
+ * 추적 중에는 대상의 이동량을 그대로 실어 나르고(feed-forward) **오프셋만** 보간합니다.
+ * 단순 lerp 는 정상 상태에서도 속도에 비례한 지연이 남아, ×128 근지점처럼
+ * 프레임당 수십 px 씩 움직일 때 포탄이 화면 중앙에서 수백 px 벗어나 버립니다.
  */
 export class Camera {
   targetOx = 0;
@@ -14,7 +18,7 @@ export class Camera {
   smoothOy = 0;
   tracking = false;
 
-  constructor({ followLerp = 0.05, idleLerp = 0.08 } = {}) {
+  constructor({ followLerp = 0.08, idleLerp = 0.08 } = {}) {
     this.followLerp = followLerp;
     this.idleLerp = idleLerp;
   }
@@ -45,6 +49,7 @@ export class Camera {
     const { width: W, height: H } = viewport;
 
     if (followWorldPos) {
+      const wasTracking = this.tracking;
       this.tracking = true;
       const { x, y } = followWorldPos;
       const r = Math.hypot(x, y);
@@ -55,6 +60,12 @@ export class Camera {
       if (clamp) {
         desiredOx = Math.max(-W * 0.4, Math.min(W * 1.4, desiredOx));
         desiredOy = Math.max(-H * 0.4, Math.min(H * 1.4, desiredOy));
+      }
+      // 이미 추적 중이었다면 대상의 이번 프레임 이동량을 그대로 따라갑니다.
+      // (추적 시작 순간의 점프는 아래 lerp 로 부드럽게 흡수)
+      if (wasTracking) {
+        this.smoothOx += desiredOx - this.targetOx;
+        this.smoothOy += desiredOy - this.targetOy;
       }
       this.targetOx = desiredOx;
       this.targetOy = desiredOy;

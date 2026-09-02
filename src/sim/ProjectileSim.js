@@ -1,4 +1,4 @@
-import { R_EARTH, ESCAPE_RADIUS, DT_ORBITAL } from '../core/constants.js';
+import { R_EARTH, GM, ESCAPE_RADIUS, DT_ORBITAL } from '../core/constants.js';
 import { pointMassGravity } from '../physics/gravity.js';
 import { velocityVerlet } from '../physics/integrators.js';
 import { Trail } from './Trail.js';
@@ -124,9 +124,18 @@ export class ProjectileSim {
       this.trail.record({ x: this.pos.x, y: this.pos.y, spd, alt });
 
       if (r <= this.surfaceRadius) return this.#finishImpact(spd);
-      if (r >= this.escapeRadius) return this.#finishEscape();
+      if (r >= this.escapeRadius && this.unbound) return this.#finishEscape();
     }
     return null;
+  }
+
+  /**
+   * 속박되지 않은(에너지 ≥ 0 → 포물선·쌍곡선) 상태인가.
+   * 탈출 판정의 근거입니다: 아무리 멀리 가도 에너지가 음수면 돌아오는 타원입니다.
+   * (점질량 중력 기준. 에너지 드리프트는 ~1e-6 이라 부호 판정엔 충분합니다)
+   */
+  get unbound() {
+    return (this.vel.x ** 2 + this.vel.y ** 2) / 2 - GM / this.radius >= 0;
   }
 
   #finishImpact(spd) {

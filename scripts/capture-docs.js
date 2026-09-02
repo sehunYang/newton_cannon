@@ -61,11 +61,27 @@ try {
   await wait(700);
   await page.keyboard.press('g');
   await page.click('#btn-fire');
+  // 비행 중에는 카메라가 포탄을 따라갑니다 — 원지점 근처에서 한 장
+  await page.waitForFunction(() => window.__cannon.router.current.sim.radius > 3.6 * 6.371e6,
+    null, { timeout: 60000 });
+  await shot('02a-orbit-follow');
+  // 한 바퀴를 다 돌면 지구 중앙 + 타원 전체가 보이게 물러납니다
   await page.waitForFunction(() => window.__cannon.router.current.sim.trail.locked,
     null, { timeout: 60000 });
-  await wait(400);
+  await wait(3000);
   await shot('02-orbit-ellipse');
   await page.keyboard.press('g');
+
+  // ②b 지구 위치 표시창 — 11 km/s 로 20 Re 까지 나가면 지구가 화면 밖
+  await reset();
+  await setSlider('#s-spd', 11000);
+  await wait(500);
+  await page.keyboard.press('4');
+  await page.click('#btn-fire');
+  await page.waitForFunction(() => window.__cannon.router.current.sim.radius > 20 * 6.371e6,
+    null, { timeout: 60000 });
+  await wait(300);
+  await shot('02b-earth-locator');
 
   // ③ 탈출 궤도 — 80 Re 까지 가므로 압축 보기(L)로 찍고 되돌립니다
   await reset();

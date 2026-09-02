@@ -4,9 +4,8 @@ import { Trail } from '../../sim/Trail.js';
 import { pointMassGravity } from '../../physics/gravity.js';
 import { RadialLogProjection } from '../../render/projections/RadialLogProjection.js';
 import { RadialLinearProjection } from '../../render/projections/RadialLinearProjection.js';
-import { createLaunchState } from '../../sim/launchState.js';
 import {
-  speedToZoom, altToZoom, fitZoomForOrbit, fitZoomForRadius,
+  speedToZoom, altToZoom, followZoom, fitZoomForOrbit, fitZoomForRadius,
 } from '../../render/zoomPolicy.js';
 
 import { backgroundLayer } from '../../render/layers/background.js';
@@ -18,6 +17,7 @@ import { mountainLayer } from '../../render/layers/mountain.js';
 import { cannonLayer } from '../../render/layers/cannon.js';
 import { createTrailLayer } from '../../render/layers/trail.js';
 import { markersLayer } from '../../render/layers/markers.js';
+import { earthLocatorLayer } from '../../render/layers/earthLocator.js';
 import { projectileLayer } from '../../render/layers/projectile.js';
 import { particlesLayer, explosionLayer } from '../../render/layers/effects.js';
 
@@ -30,8 +30,10 @@ import { particlesLayer, explosionLayer } from '../../render/layers/effects.js';
  *
  * 투영은 두 가지 중 display.trueScale 로 고릅니다.
  *  - 실제 축척(기본): 궤적이 화면에서도 정확한 원뿔곡선. 지구가 초점에 있습니다.
- *  - 압축 보기      : 로그 반지름. 80 Re 탈출까지 한 화면 — 대신 모양은 왜곡됩니다.
- * 줌 정책도 투영에 따라 다르므로 여기서 함께 고릅니다(zoomPolicy 참고).
+ *                     카메라가 포탄을 따라가고(followZoom), 한 바퀴를 다 돌거나 비행이
+ *                     끝나면 지구를 중앙에 두고 전체가 보이게 물러납니다.
+ *  - 압축 보기      : 로그 반지름. 30 Re 탈출까지 한 화면 — 대신 모양은 왜곡됩니다.
+ * 줌·카메라 정책도 투영에 따라 다르므로 여기서 함께 고릅니다(zoomPolicy 참고).
  */
 export function createOrbitalMode() {
   const sim = new ProjectileSim({
@@ -58,28 +60,42 @@ export function createOrbitalMode() {
     projectileLayer,
     particlesLayer,
     explosionLayer,
+    earthLocatorLayer,
   ];
 
   let ctx = null;
   /** 현재 적용된 투영이 실제 축척인지 (display 와 어긋나면 update 에서 갈아끼움) */
   let trueScale = null;
-  /** 실제 축척에서 발사 순간 확정한 '궤도 전체' 줌 */
-  let launchZoom = 1;
 
   const projectionFor = (isTrue) => (isTrue ? RadialLinearProjection : RadialLogProjection);
 
-  /** 발사 전·리셋 시 "이 설정으로 쏘면 이만큼 보인다"의 줌 */
+  /** 실제 축척에서 "한 바퀴 다 돌았다" — 추적을 멈추고 타원 전체를 보여줄 시점 */
+  const orbitShown = () => trueScale && sim.trail.locked;
+
+  /** 발사 전·리셋 시의 줌. 압축 보기는 속도로 미리 물러나고, 실제 축척은 지구를 그대로 둡니다 */
   function previewZoom(vp, config) {
     if (!trueScale) return speedToZoom(config.initSpeed);
-    return fitZoomForOrbit(createLaunchState(config), vp);
+    return 1;
   }
 
   /** 비행 중 줌 */
   function flightZoom(vp, config) {
     if (!trueScale) return Math.min(speedToZoom(config.initSpeed), altToZoom(sim.radius));
-    // 속박 궤도면 발사 때 정한 줌을 유지(타원이 흔들리지 않게),
-    // 탈출 궤도면 포탄을 따라 계속 물러납니다.
-    return Math.min(launchZoom, fitZoomForRadius(sim.radius * 1.05, vp));
+    if (orbitShown()) return fitZoomForOrbit({ pos: sim.pos, vel: sim.vel }, vp);
+    return followZoom(sim.radius);
+  }
+
+  /** 착탄·탈출 뒤 결과 화면: 궤적 전체(최고 고도까지)가 보이게. 압축 보기는 그대로 둡니다 */
+  function doneZoom(vp) {
+    if (!trueScale) return vp.zoom.target;
+    return fitZoomForRadius(R_EARTH + sim.stats.maxAlt, vp);
+  }
+
+  /** 지금 상태에서 정책이 원하는 줌 */
+  function policyZoom(vp, config) {
+    if (sim.active) return flightZoom(vp, config);
+    if (sim.done) return doneZoom(vp);
+    return previewZoom(vp, config);
   }
 
   /**
@@ -112,7 +128,7 @@ export function createOrbitalMode() {
       const cfg = config ?? { angleDeg: 0, initSpeed: 0 };
       // 이월된 비행(지표면 착탄)은 그 비행이 다 보이는 줌으로
       const z = carry?.state
-        ? Math.min(previewZoom(modeCtx.vp, cfg), fitZoomForOrbit(createLaunchState(cfg), modeCtx.vp))
+        ? Math.min(previewZoom(modeCtx.vp, cfg), fitZoomForRadius(R_EARTH + carry.stats.maxAlt, modeCtx.vp))
         : previewZoom(modeCtx.vp, cfg);
       modeCtx.vp.setZoom(z, { immediate: !carry });
       modeCtx.cam.centerOn(modeCtx.vp);
@@ -128,8 +144,6 @@ export function createOrbitalMode() {
 
     launch(launchState) {
       sim.launch(launchState);
-      // 실제 축척에서는 타원 전체가 들어오는 줌을 발사 순간 확정합니다
-      launchZoom = fitZoomForOrbit(launchState, ctx.vp);
       ctx.fx.launch.trigger(ctx.vp, launchState.config.angleDeg);
     },
 
@@ -177,25 +191,17 @@ export function createOrbitalMode() {
 
     update({ vp, cam, config, display }) {
       // 체크박스로 축척을 바꾸면 그 자리에서 투영을 갈아끼웁니다
-      if (syncProjection(vp, display)) {
-        if (sim.active || sim.done) launchZoom = fitZoomForOrbit({ pos: sim.pos, vel: sim.vel }, vp);
-        vp.setZoom(sim.active || sim.done ? flightZoom(vp, config) : previewZoom(vp, config),
-          { immediate: true });
-      }
+      if (syncProjection(vp, display)) vp.setZoom(policyZoom(vp, config), { immediate: true });
 
-      // ── 줌: 발사 전엔 미리보기, 비행 중엔 궤도가 화면에 들어오는 쪽 ──
-      if (!sim.active && !sim.done) {
-        vp.zoom.target = previewZoom(vp, config);
-      } else if (sim.active) {
-        vp.zoom.target = flightZoom(vp, config);
-      }
+      // ── 줌: 발사 전 미리보기 / 비행 중 추적 / 결과 화면 ──
+      vp.zoom.target = policyZoom(vp, config);
       vp.updateZoom();
 
-      // ── 카메라: 압축 보기에서만 포탄 추적 ──
-      // 실제 축척은 줌 정책이 궤도 전체를 화면에 넣어 주므로 지구를 중앙에 고정합니다.
-      // (포탄을 따라가면 타원이 화면에서 밀려 다니며 반대편이 잘립니다)
-      const follow = sim.active && sim.trail.length > 0 && !trueScale ? sim.pos : null;
-      cam.update(vp, follow);
+      // ── 카메라: 비행 중 포탄 추적. 실제 축척은 한 바퀴를 다 돌면 지구 중앙으로 ──
+      // 압축 보기는 지구가 화면에서 너무 멀어지지 않게 clamp 하지만, 실제 축척은
+      // 지구가 수천 px 밖에 있는 게 정상이므로(earthLocator 가 방향을 알려줌) 풀어 둡니다.
+      const follow = sim.active && sim.trail.length > 0 && !orbitShown() ? sim.pos : null;
+      cam.update(vp, follow, { clamp: !trueScale });
       if (!sim.active && !sim.done) cam.centerOn(vp);
 
       // ── 물리: 배속만큼 스텝 진행 ──
