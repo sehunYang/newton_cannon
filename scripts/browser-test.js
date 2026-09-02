@@ -433,11 +433,17 @@ try {
   await shot('06a-추적카메라');
   await page.keyboard.press('4');
 
-  // 한 바퀴를 다 돌면 지구를 중앙에 두고 타원 전체가 보이게 물러납니다
+  // 한 바퀴를 다 돌아도 추적은 계속됩니다. F(포탄 추적 해제)로 지구 중앙 + 타원 전체 보기
   await page.waitForFunction(() => window.__cannon.router.current.sim.trail.locked,
     null, { timeout: 40000 });
+  await page.waitForTimeout(300);
+  const locked = await camState();
+  check('1회 공전 후에도 포탄 추적 유지', Math.hypot(locked.offX, locked.offY) < 40,
+    `오프셋 ${Math.hypot(locked.offX, locked.offY).toFixed(0)} px`);
+  await page.keyboard.press('f');
   await page.waitForTimeout(2500);
-  check('1회 공전 후 지구 중앙 복귀', (await camState()).camAtEarth);
+  check('F → 추적 해제, 지구 중앙 복귀', (await camState()).camAtEarth);
+  check('체크박스 동기화 (포탄 추적 해제)', !(await page.$eval('#chk-follow', (el) => el.checked)));
 
   /**
    * 화면에 찍힌 궤적 점이 "지구 중심을 초점으로 하는 원뿔곡선" 위에 있는지 잽니다.
@@ -493,12 +499,15 @@ try {
   const shLog = await shapeCheck();
   check('L → 압축 보기(로그 투영)', shLog.projection === 'radial-log', shLog.projection);
   check('체크박스 동기화 (해제)', !(await page.locator('#chk-scale').isChecked()));
+  check('압축 보기 경고 배지 표시', await page.$eval('#scale-badge', (el) => el.style.display === 'flex'));
   check('로그 투영에서는 초점이 어긋남 (검증 지표가 왜곡을 잡아냄)', shLog.maxRel > 0.05,
     `max 잔차 ${(shLog.maxRel * 100).toFixed(1)}%, 거리비 ${shLog.screenRatio.toFixed(2)}`);
   await shot('06c-압축보기-타원');
   await page.keyboard.press('l');
   await page.waitForTimeout(400);
   check('L → 실제 축척 복귀', (await shapeCheck()).projection === 'radial-linear');
+  await page.keyboard.press('f');
+  check('F → 포탄 추적 복귀', await page.$eval('#chk-follow', (el) => el.checked));
 
   // ═══ [5c] 탈출 속도 미만의 먼 타원 — 지구 위치 표시창 + 에너지 기준 탈출 판정 ═══
   console.log('\n[5c] 11000 m/s, 0° — 원지점 30.6 Re 타원');

@@ -29,6 +29,7 @@ export const els = {
   simSpeedVal: () => $('simspd-val'),
   modeBadge: () => $('mode-badge'),
   modeVal: () => $('mode-val'),
+  scaleBadge: () => $('scale-badge'),
 
   // 컨트롤
   sliderAngle: () => $('s-ang'),
@@ -43,6 +44,7 @@ export const els = {
   chkTrail: () => $('chk-trail'),
   chkGrid: () => $('chk-grid'),
   chkScale: () => $('chk-scale'),
+  chkFollow: () => $('chk-follow'),
 
   // 모바일 레이아웃 계산용
   ctrlPanel: () => document.querySelector('.ctrl-panel'),

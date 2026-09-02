@@ -125,8 +125,11 @@ EventBus ──► App  (유일한 상태 소유자: config / display)
      clamp 는 끄므로 지구가 화면 밖으로 나갈 수 있고, 그때 `earthLocator` 레이어가
      지구 방향 가장자리에 둥근 창(미니 지구 + 거리)을 띄웁니다. 창이 DOM 오버레이(타이틀·HUD·패널)와
      겹치면 같은 가장자리를 따라 비켜섭니다(`.ui > *` 의 사각형을 읽음).
-  3. 한 바퀴를 돌아 궤적이 잠기면(`trail.locked`) 지구를 중앙에 두고 `fitZoomForOrbit` 으로
-     **타원 전체**(원지점이 화면의 80% 안)를 보여 줍니다. 착탄·탈출 뒤에는 `fitZoomForRadius(R_EARTH + maxAlt)`.
+  3. `display.followCam` 을 끄면(`F` / 포탄 추적 체크 해제) 지구를 중앙에 두고 `fitZoomForOrbit` 으로
+     **타원 전체**(원지점이 화면의 80% 안)를, 비속박이면 `fitZoomForRadius(r·1.05)` 를 보여 줍니다.
+     착탄·탈출 뒤에는 `fitZoomForRadius(R_EARTH + maxAlt)`.
+  압축 보기에서는 좌상단에 `축척 압축 · 모양 왜곡` 경고 배지(`#scale-badge`)가 뜹니다 —
+  로그 반지름은 먼 타원의 원지점 쪽을 뾰족한 달걀꼴로 만들기 때문입니다.
 
   추적 카메라(`Camera.update`)는 대상의 프레임당 이동량을 그대로 실어 나르고 **오프셋만** lerp 합니다
   (feed-forward). 단순 lerp 는 정상 상태에서도 속도에 비례한 지연이 남아 ×128 근지점에서 포탄이

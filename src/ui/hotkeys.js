@@ -14,6 +14,7 @@ export function bindHotkeys(bus, { getDisplay } = {}) {
     g: () => bus.emit(EV.DISPLAY_CHANGED, { showGrid: !getDisplay().showGrid }),
     t: () => bus.emit(EV.DISPLAY_CHANGED, { showTrail: !getDisplay().showTrail }),
     l: () => bus.emit(EV.DISPLAY_CHANGED, { trueScale: !getDisplay().trueScale }),
+    f: () => bus.emit(EV.DISPLAY_CHANGED, { followCam: !getDisplay().followCam }),
     1: () => bus.emit(EV.TIME_SCALE_CHANGED, { mult: 1 }),
     2: () => bus.emit(EV.TIME_SCALE_CHANGED, { mult: 8 }),
     3: () => bus.emit(EV.TIME_SCALE_CHANGED, { mult: 32 }),

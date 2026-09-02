@@ -74,6 +74,10 @@
       <div class="badge-pill badge-mode" id="mode-badge" style="display:none">
         <span>시점</span><b id="mode-val">지표면</b>
       </div>
+      <!-- 압축 보기(로그 축척)일 때만 표시 — 궤도 모양이 왜곡된다는 경고 -->
+      <div class="badge-pill badge-warn" id="scale-badge" style="display:none">
+        <span>축척</span><b>압축 · 모양 왜곡</b>
+      </div>
     </div>
 
     <!-- 컨트롤 패널 (우하단) -->
@@ -134,10 +138,14 @@
         <input type="checkbox" id="chk-scale" checked>
         <span class="check-box"></span>실제 축척
       </label>
+      <label class="check-item" title="끄면 지구를 가운데 두고 궤도 전체가 보이게 물러납니다 (실제 축척에서만)">
+        <input type="checkbox" id="chk-follow" checked>
+        <span class="check-box"></span>포탄 추적
+      </label>
     </div>
 
     <div class="shortcut-hint">
-      <span>Space: 발사 / R: 리셋 / G: 격자 / L: 축척 / 1·2·3·4: 시뮬속도</span>
+      <span>Space: 발사 / R: 리셋 / G: 격자 / L: 축척 / F: 추적 / 1·2·3·4: 시뮬속도</span>
     </div>
 
   </div><!-- /.ui -->
