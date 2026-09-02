@@ -1,4 +1,4 @@
-import { GM } from '../core/constants.js';
+import { GM, R_LAUNCH } from '../core/constants.js';
 
 /**
  * 비에너지(단위 질량당 에너지) — 포탄 1 kg 이 가진 에너지. 단위 J/kg.
@@ -14,9 +14,26 @@ import { GM } from '../core/constants.js';
  * E > 0 이면 탈출(쌍곡선). `orbitalElements` 의 energy 와 같은 값이며,
  * `ProjectileSim.unbound` 도 이 부호로 탈출을 판정합니다.
  */
+
 export function specificEnergy(pos, vel, gm = GM) {
   const r = Math.hypot(pos.x, pos.y);
   const k = (vel.x * vel.x + vel.y * vel.y) / 2;
   const u = -gm / r;
   return { k, u, e: k + u };
 }
+
+/**
+ * 퍼텐셜의 기준점을 무한대에서 **발사 지점**으로 옮길 때 더하는 상수 (J/kg).
+ *
+ *   U' = U + U_LAUNCH_REF = GM/R_발사 − GM/r  ≥ 0   (발사 지점에서 0, 높이 올라갈수록 증가)
+ *
+ * 그래프가 이 기준을 쓰는 이유는 **눈금이 그 비행의 에너지 규모에 맞춰지기** 때문입니다.
+ * 무한대 기준으로 그리면 축의 대부분을 정보가 없는 상수(−62.5 MJ/kg)가 차지해서,
+ * 2 km/s 발사에서는 실제 변화가 축의 1.6% 밖에 안 돼 눈에 보이지 않습니다.
+ *
+ * 물리적으로는 상수를 더한 것뿐이라 곡선의 모양·에너지 보존·교환 관계가 모두 그대로이고,
+ * 지표 근처에서는 U' ≈ gh 라 교과서의 mgh 와 곧바로 이어집니다(고도 100 km 에서 0.96 MJ/kg).
+ *
+ * 이 값은 곧 **탈출에 필요한 에너지**이기도 합니다 — E' = U_LAUNCH_REF 가 무한대 기준의 E = 0.
+ */
+export const U_LAUNCH_REF = GM / R_LAUNCH;

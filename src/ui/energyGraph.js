@@ -1,4 +1,4 @@
-import { specificEnergy } from '../physics/energy.js';
+import { specificEnergy, U_LAUNCH_REF } from '../physics/energy.js';
 import { fmtTime } from '../core/format.js';
 import { els } from './dom.js';
 
@@ -12,6 +12,15 @@ import { els } from './dom.js';
  *    E 가 0 위로 올라가 있는 게 한눈에 보입니다.
  *  - 적분기(속도 베를레)가 에너지를 정말 보존하는지 눈으로 확인시켜 줍니다.
  *
+ * **눈금은 그 비행의 에너지 규모에 자동으로 맞춰집니다.** 퍼텐셜의 기준점을 발사 지점으로
+ * 잡았기 때문입니다(U' = GM/R_발사 − GM/r ≥ 0, energy.js 의 U_LAUNCH_REF 참고).
+ * 무한대 기준으로 그리면 축의 대부분을 정보가 없는 상수(−62.5 MJ/kg)가 차지해서
+ * 2 km/s 발사의 변화는 축의 1.6%(약 2 px)라 보이지 않습니다. 기준을 옮기면 같은 발사가
+ * 축의 90% 를 씁니다 — 상수를 더한 것뿐이라 물리는 그대로입니다.
+ *
+ * 대신 "E < 0 이면 속박" 이 "E' < 탈출선(62.5 MJ/kg) 이면 속박" 이 되므로, 그 선이
+ * 화면에 들어올 만한 발사에서는 점선으로 함께 그립니다.
+ *
  * 캔버스는 시뮬레이션 캔버스와 별개인 작은 DOM 캔버스입니다. `.ui` 의 자식이라
  * earthLocator 의 창이 알아서 이 패널을 피해 갑니다.
  */
@@ -20,12 +29,16 @@ import { els } from './dom.js';
 const MAX_POINTS = 240;
 
 const COLOR = { k: '#ffa040', u: '#3a8eff', e: '#7ef0c8' };
+/** 탈출선(= 무한대 기준의 E = 0)이 이 비율 이상 올라와야 그려 줍니다 */
+const ESCAPE_LINE_MIN = 0.6;
 /** 좌우 여백은 고정, 위아래는 캔버스가 낮을수록 줄입니다(작은 폰에서 곡선이 눌리지 않게) */
 const PAD_X = 8;
 const padY = (h) => Math.max(9, Math.min(14, h * 0.14));
 
 const toMJ = (v) => v / 1e6;
 const fmtMJ = (v) => `${toMJ(v).toFixed(1)}`;
+/** 축 눈금: 값이 작을수록 소수점을 살립니다 (2 MJ/kg 짜리 발사에서 '0, 2' 만 보이면 곤란) */
+const fmtAxis = (v) => (v === 0 ? '0' : Math.abs(v) >= 10 ? toMJ(v).toFixed(0) : toMJ(v).toFixed(1));
 
 export class EnergyGraph {
   /** @type {{t:number,k:number,u:number,e:number}[]} 단위 J/kg */
@@ -34,6 +47,8 @@ export class EnergyGraph {
   #interval = 0;
   #w = 0;
   #h = 0;
+  /** 마지막으로 그린 y 축 범위 (테스트·디버깅용) */
+  axis = { lo: 0, hi: 0, showEscape: false };
 
   constructor() {
     this.canvas = els.energyCanvas?.();
@@ -92,16 +107,25 @@ export class EnergyGraph {
       return;
     }
 
-    // ── 값의 범위. 0 을 반드시 포함시킵니다 (E 의 부호가 궤도의 운명이므로) ──
+    // ── 값의 범위: 이번 비행의 데이터에 맞춰 잡습니다 (발사 지점을 0 으로 본 값) ──
+    // 세 곡선 모두 0 근처에서 시작하므로 축의 크기가 곧 그 비행의 에너지 규모가 됩니다.
     let lo = 0;
     let hi = 0;
     for (const p of pts) {
-      lo = Math.min(lo, p.u, p.k, p.e);
-      hi = Math.max(hi, p.u, p.k, p.e);
+      const u = p.u + U_LAUNCH_REF;
+      const e = p.e + U_LAUNCH_REF;
+      lo = Math.min(lo, u, p.k, e);
+      hi = Math.max(hi, u, p.k, e);
     }
+    // 탈출선이 가까이 왔으면 축에 포함시켜 "넘었는가"를 보여 줍니다
+    const showEscape = hi >= U_LAUNCH_REF * ESCAPE_LINE_MIN;
+    if (showEscape) hi = Math.max(hi, U_LAUNCH_REF * 1.02);
     const margin = (hi - lo) * 0.08 || 1;
-    lo -= margin;
+    // 발사 지점보다 살짝 아래(착탄은 에베레스트 높이만큼 낮습니다)로 내려가는 정도는
+    // 0 에 맞춰 둡니다 — 눈금에 '-0.0' 이 뜨는 게 더 헷갈립니다
+    lo = lo < -margin ? lo - margin : 0;
     hi += margin;
+    this.axis = { lo, hi, showEscape };
 
     const t0 = pts[0].t;
     const t1 = Math.max(pts[pts.length - 1].t, t0 + 1e-6);
@@ -111,29 +135,41 @@ export class EnergyGraph {
     const X = (t) => PAD_X + ((t - t0) / (t1 - t0)) * plotW;
     const Y = (v) => pad + ((hi - v) / (hi - lo)) * plotH;
 
-    // ── 0 선 ──
-    const y0 = Y(0);
-    ctx.strokeStyle = 'rgba(120,160,210,0.35)';
+    // ── 기준선 ──
+    ctx.font = '9px "Space Mono",monospace';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
+
+    // 0 = 발사 지점에 정지해 있는 상태
+    const y0 = Y(0);
+    ctx.strokeStyle = 'rgba(120,160,210,0.3)';
     ctx.beginPath();
     ctx.moveTo(PAD_X, y0);
     ctx.lineTo(w - PAD_X, y0);
     ctx.stroke();
+
+    // 탈출선: 역학적 에너지가 이 위로 올라가면 돌아오지 않습니다 (무한대 기준의 E = 0)
+    if (showEscape) {
+      const yEsc = Y(U_LAUNCH_REF);
+      ctx.strokeStyle = 'rgba(126,240,200,0.4)';
+      ctx.beginPath();
+      ctx.moveTo(PAD_X, yEsc);
+      ctx.lineTo(w - PAD_X, yEsc);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(126,240,200,0.75)';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('탈출', w - PAD_X, yEsc - 1);
+    }
     ctx.setLineDash([]);
 
-    ctx.font = '9px "Space Mono",monospace';
-    ctx.fillStyle = 'rgba(120,160,210,0.6)';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('0', PAD_X, y0 - 1);
-
-    // ── 세 곡선 ──
+    // ── 세 곡선 (K 는 그대로, U·E 는 발사 지점 기준으로 올려서) ──
+    const val = (p, key) => (key === 'k' ? p.k : p[key] + U_LAUNCH_REF);
     for (const key of ['u', 'k', 'e']) {
       ctx.beginPath();
       for (let i = 0; i < pts.length; i++) {
         const x = X(pts[i].t);
-        const y = Y(pts[i][key]);
+        const y = Y(val(pts[i], key));
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
@@ -146,7 +182,7 @@ export class EnergyGraph {
     const now = pts[pts.length - 1];
     for (const key of ['u', 'k', 'e']) {
       ctx.beginPath();
-      ctx.arc(X(now.t), Y(now[key]), key === 'e' ? 2.6 : 2, 0, Math.PI * 2);
+      ctx.arc(X(now.t), Y(val(now, key)), key === 'e' ? 2.6 : 2, 0, Math.PI * 2);
       ctx.fillStyle = COLOR[key];
       ctx.fill();
     }
@@ -155,19 +191,20 @@ export class EnergyGraph {
     ctx.fillStyle = 'rgba(90,122,160,0.75)';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(`${toMJ(hi).toFixed(0)}`, PAD_X, 1);
+    ctx.fillText(fmtAxis(hi), PAD_X, 1);
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${toMJ(lo).toFixed(0)}`, PAD_X, h - 1);
+    ctx.fillText(fmtAxis(lo), PAD_X, h - 1);
     ctx.textAlign = 'right';
     ctx.fillText(fmtTime(t1), w - PAD_X, h - 1);
 
     this.#setLegend(now);
   }
 
+  /** 범례도 그래프와 같은 기준(발사 지점 = 0)으로 씁니다 */
   #setLegend(now) {
     const set = (el, v) => { if (el) el.textContent = now ? fmtMJ(v) : '—'; };
     set(els.energyK?.(), now?.k);
-    set(els.energyU?.(), now?.u);
-    set(els.energyE?.(), now?.e);
+    set(els.energyU?.(), now === null ? null : now.u + U_LAUNCH_REF);
+    set(els.energyE?.(), now === null ? null : now.e + U_LAUNCH_REF);
   }
 }

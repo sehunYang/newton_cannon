@@ -632,6 +632,40 @@ try {
   await page.waitForTimeout(200);
   check('E → 다시 표시', (await energyState()).visible);
 
+  // ── 눈금이 그 비행의 에너지 규모에 맞춰지는가 ──
+  // 퍼텐셜 기준을 발사 지점으로 잡았기 때문에, 느린 발사일수록 축이 함께 줄어듭니다.
+  // (무한대 기준으로 그리면 2 km/s 발사의 변화가 축의 1.6% 라 보이지 않았습니다)
+  const axisFor = async (spd, ang) => {
+    await page.keyboard.press('r');
+    await page.waitForTimeout(400);
+    await setSlider('#s-ang', ang);
+    await setSlider('#s-spd', spd);
+    await page.waitForTimeout(400);
+    await page.keyboard.press('4');
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => {
+      const s = window.__cannon.router.current.sim;
+      return s.done || s.trail.locked;
+    }, null, { timeout: 90000 });
+    await page.waitForTimeout(400);
+    return page.evaluate(() => {
+      const g = window.__cannon.energy;
+      const span = g.axis.hi - g.axis.lo;
+      const ks = g.points.map((p) => p.k);
+      return { span, esc: g.axis.showEscape, swing: (Math.max(...ks) - Math.min(...ks)) / span };
+    });
+  };
+
+  const slow = await axisFor(2000, 45);
+  check('저속 발사는 눈금도 작아짐 (< 5 MJ/kg)', slow.span < 5e6, `${(slow.span / 1e6).toFixed(2)} MJ/kg`);
+  check('저속에서도 변화가 축의 30% 이상', slow.swing > 0.3, `${(slow.swing * 100).toFixed(0)}%`);
+  check('저속 발사에는 탈출선을 그리지 않음', !slow.esc);
+
+  const fast = await axisFor(10000, 0);
+  check('빠른 발사는 눈금이 커짐 (> 50 MJ/kg)', fast.span > 50e6, `${(fast.span / 1e6).toFixed(2)} MJ/kg`);
+  check('빠른 발사에서도 변화가 축의 30% 이상', fast.swing > 0.3, `${(fast.swing * 100).toFixed(0)}%`);
+  check('탈출선 표시', fast.esc);
+
   // 탈출 발사는 E > 0
   await page.keyboard.press('r');
   await page.waitForTimeout(400);

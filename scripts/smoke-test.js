@@ -225,7 +225,7 @@ check('HUD 가 이월 결과 표시', document.getElementById('hud-impang').text
 // ═══ [8] 에너지 — 물리량과 그래프 표본 ═══
 console.log('');
 console.log('[8] 에너지 (운동·퍼텐셜·역학적)');
-const { specificEnergy } = await import('../src/physics/energy.js');
+const { specificEnergy, U_LAUNCH_REF } = await import('../src/physics/energy.js');
 const { GM: GM8, R_EARTH: RE8, V1: V18, V2: V28 } = await import('../src/core/constants.js');
 
 // 지표면에서 정지: K = 0, U = −GM/R
@@ -242,6 +242,12 @@ check('원궤도는 E < 0 (속박)', circ.e < 0, `${(circ.e / 1e6).toFixed(1)} M
 const esc = specificEnergy({ x: 0, y: RE8 }, { x: V28, y: 0 });
 check('탈출 속도에서 E = 0', Math.abs(esc.e) / esc.k < 2e-3, `${(esc.e / 1e6).toFixed(3)} MJ/kg`);
 check('탈출 속도 초과면 E > 0', specificEnergy({ x: 0, y: RE8 }, { x: V28 * 1.05, y: 0 }).e > 0);
+
+// 발사 지점 기준 퍼텐셜: 그래프가 쓰는 기준 (U' = U + U_LAUNCH_REF)
+check('기준 상수 = 탈출에 필요한 에너지', Math.abs(U_LAUNCH_REF - V28 ** 2 / 2) / U_LAUNCH_REF < 2e-3,
+  `${(U_LAUNCH_REF / 1e6).toFixed(1)} MJ/kg`);
+check('발사 지점에서 U 는 0', Math.abs(specificEnergy({ x: 0, y: 6.371e6 + 8848 }, { x: 0, y: 0 }).u + U_LAUNCH_REF) < 1);
+check('E 부호 판정은 기준을 옮겨도 같음', (circ.e + U_LAUNCH_REF) < U_LAUNCH_REF && (esc.e + U_LAUNCH_REF) <= U_LAUNCH_REF * 1.001);
 
 // 그래프: 발사하면 표본이 쌓이고 역학적 에너지가 보존되어야 합니다
 app.reset();
