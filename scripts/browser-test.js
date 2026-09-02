@@ -125,6 +125,12 @@ try {
   const ink0 = await canvasInkRatio();
   check('캔버스에 그림이 그려짐', ink0 > 0.05, `잉크 비율 ${(ink0 * 100).toFixed(1)}%`);
 
+  // 파비콘: 다른 shy.ai.kr 사이트와 같은 로고를 실제로 받아올 수 있어야 합니다
+  const favHref = await page.getAttribute('link[rel="icon"]', 'href');
+  const favRes = await page.request.get(new URL(favHref, BASE).href);
+  check('파비콘이 로고 PNG', favHref.includes('favicon.png') && favRes.status() === 200
+    && favRes.headers()['content-type'].includes('image/png'), `${favHref} ${favRes.status()}`);
+
   check('HUD 초기값', (await text('#hud-spd')) === '— m/s');
   check('궤도 배지 = 타원 호 낙하', (await text('#hud-orbit')) === '타원 호 낙하', await text('#hud-orbit'));
   check('줌 배지 표시', /^\d\.\d\d×$/.test(await text('#zoom-val')), await text('#zoom-val'));
@@ -571,6 +577,77 @@ try {
   check('30 Re 를 넘어도 속박 궤도라 비행 계속', beyond.active && !beyond.done, `outcome=${beyond.outcome}`);
   check('배지는 여전히 타원 궤도', (await text('#hud-orbit')) === '타원/원 궤도', await text('#hud-orbit'));
 
+  // ═══ [5d] 에너지 그래프 ═══
+  console.log('');
+  console.log('[5d] 에너지 그래프 (운동·퍼텐셜·역학적)');
+
+  /** 그래프 캔버스에 실제로 잉크가 묻었는가 + 표본 통계 */
+  const energyState = () => page.evaluate(() => {
+    const g = window.__cannon.energy;
+    const c = document.getElementById('energy-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let ink = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 20) ink++;
+    const es = g.points.map((q) => q.e);
+    return {
+      n: g.points.length,
+      ink: ink / (d.length / 4),
+      visible: getComputedStyle(document.getElementById('energy-panel')).display !== 'none',
+      drift: es.length ? (Math.max(...es) - Math.min(...es)) / Math.abs(es[0]) : null,
+      last: g.points.at(-1) ?? null,
+      legend: ['e-k', 'e-u', 'e-t'].map((id) => document.getElementById(id).textContent),
+    };
+  });
+
+  await page.keyboard.press('r');
+  await page.waitForTimeout(400);
+  await setSlider('#s-spd', 10000);
+  await page.waitForTimeout(400);
+  const eIdle = await energyState();
+  check('발사 전 패널 표시 + 표본 없음', eIdle.visible && eIdle.n === 0);
+  check('발사 전 범례는 —', eIdle.legend.every((t) => t === '—'), eIdle.legend.join(' '));
+
+  await page.keyboard.press('3');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__cannon.router.current.sim.trail.locked,
+    null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const eOrbit = await energyState();
+  check('표본이 쌓임', eOrbit.n > 100, `${eOrbit.n}점`);
+  check('그래프가 그려짐', eOrbit.ink > 0.02, `잉크 ${(eOrbit.ink * 100).toFixed(1)}%`);
+  check('역학적 에너지 보존 (1회 공전, 드리프트 < 0.1%)', eOrbit.drift < 1e-3,
+    `${(eOrbit.drift * 100).toExponential(1)}%`);
+  check('타원 궤도는 E < 0', eOrbit.last.e < 0, `${(eOrbit.last.e / 1e6).toFixed(1)} MJ/kg`);
+  check('K + U = E (범례 숫자)',
+    Math.abs(parseFloat(eOrbit.legend[0]) + parseFloat(eOrbit.legend[1]) - parseFloat(eOrbit.legend[2])) < 0.15,
+    eOrbit.legend.join(' + = '));
+  await shot('07-에너지그래프');
+
+  // E 키로 끄고 켜기
+  await page.keyboard.press('e');
+  await page.waitForTimeout(200);
+  check('E → 그래프 숨김', !(await energyState()).visible);
+  check('체크박스 동기화 (에너지 해제)', !(await page.$eval('#chk-energy', (el) => el.checked)));
+  await page.keyboard.press('e');
+  await page.waitForTimeout(200);
+  check('E → 다시 표시', (await energyState()).visible);
+
+  // 탈출 발사는 E > 0
+  await page.keyboard.press('r');
+  await page.waitForTimeout(400);
+  await setSlider('#s-spd', 11600);
+  await page.waitForTimeout(300);
+  await page.keyboard.press('4');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__cannon.router.current.sim.done, null, { timeout: 90000 });
+  await page.waitForTimeout(200);
+  const eEsc = await energyState();
+  check('탈출 궤도는 E > 0', eEsc.last.e > 0, `${(eEsc.last.e / 1e6).toFixed(1)} MJ/kg`);
+  check('탈출해도 에너지는 보존', eEsc.drift < 1e-3, `${(eEsc.drift * 100).toExponential(1)}%`);
+  await page.keyboard.press('r');
+  await page.waitForTimeout(400);
+  check('리셋하면 표본도 비워짐', (await energyState()).n === 0);
+
   // ═══ [6] 키보드 단축키 ═══
   console.log('\n[6] 키보드 단축키');
   await page.keyboard.press('g');
@@ -632,6 +709,7 @@ try {
     `chk ${boxes.chk.bottom.toFixed(0)} ≤ btn ${boxes.btn.top.toFixed(0)}`);
   check('HUD 가 화면 안', boxes.hud.right <= boxes.vw + 1);
   check('통계 패널 숨김(세로 모바일)', !(await page.locator('#hud-stats').isVisible()));
+  check('에너지 그래프 숨김(세로 모바일)', !(await page.locator('#energy-panel').isVisible()));
   const vpW = await page.evaluate(() => window.__cannon.vp.width);
   check('캔버스 리사이즈 반영', Math.abs(vpW - 390) < 2, String(vpW));
 

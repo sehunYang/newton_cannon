@@ -16,6 +16,7 @@ import { ModeRouter } from './ModeRouter.js';
 
 import { els } from '../ui/dom.js';
 import { Hud } from '../ui/hud.js';
+import { EnergyGraph } from '../ui/energyGraph.js';
 import {
   bindControls, positionSpeedMarkers, setTimeScale, setModeBadge,
   setFireButtonLaunched, syncDisplayToggles, updateSpeedSliderBg,
@@ -42,7 +43,7 @@ export class App {
   /** 발사 설정 — UI 와 모드가 공유하는 유일한 진실 */
   config = { angleDeg: 0, initSpeed: 4000, timeScale: 8 };
   /** 표시 옵션 */
-  display = { showTrail: true, showGrid: false, followCam: true };
+  display = { showTrail: true, showGrid: false, followCam: true, showEnergy: true };
 
   /**
    * 사용자가 마지막으로 고른 배속.
@@ -57,6 +58,7 @@ export class App {
     this.vp = new Viewport();
     this.cam = new Camera();
     this.hud = new Hud();
+    this.energy = new EnergyGraph();
 
     const particles = new ParticleSystem();
     this.fx = {
@@ -106,6 +108,7 @@ export class App {
   resize() {
     const { width, height } = this.renderer.resize();
     this.vp.resize(width, height);
+    this.energy.resize();
     positionSpeedMarkers();
     updateMobileLayout();
     this.bus.emit(EV.RESIZED, { width, height });
@@ -182,6 +185,7 @@ export class App {
     const preferred = this.router.current.preferredTimeScale?.(launchState);
     if (preferred) this.#setTimeScale(preferred);
 
+    this.energy.clear();
     this.router.current.launch(launchState);
     setFireButtonLaunched(true);
   }
@@ -203,6 +207,7 @@ export class App {
     this.fx.particles.clear();
     this.fx.launch.reset();
     this.fx.explosion.reset();
+    this.energy.clear();
 
     setFireButtonLaunched(false);
     updateSpeedSliderBg(this.config.initSpeed);
@@ -243,5 +248,11 @@ export class App {
 
     this.hud.setZoom(this.vp.zoom.current);
     if (mode.sim.active || mode.sim.done) this.hud.showFlight(mode.sim, mode.id);
+
+    // 에너지 그래프 — 물리가 진행된 뒤의 상태를 기록합니다
+    if (this.display.showEnergy !== false) {
+      this.energy.sample(mode.sim);
+      this.energy.draw();
+    }
   }
 }

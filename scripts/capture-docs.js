@@ -74,6 +74,17 @@ try {
   await page.keyboard.press('f');
   await page.keyboard.press('g');
 
+  // ②c 에너지 그래프 — 타원 궤도에서 K·U 가 교환되고 E 는 수평선
+  await reset();
+  await setSlider('#s-spd', 10000);
+  await wait(600);
+  await page.keyboard.press('3');
+  await page.click('#btn-fire');
+  await page.waitForFunction(() => window.__cannon.router.current.sim.trail.locked,
+    null, { timeout: 60000 });
+  await wait(300);
+  await shot('02c-energy-graph');
+
   // ②b 지구 위치 표시창 — 11 km/s 로 20 Re 까지 나가면 지구가 화면 밖
   await reset();
   await setSlider('#s-spd', 11000);

@@ -43,6 +43,14 @@ export const els = {
   chkTrail: () => $('chk-trail'),
   chkGrid: () => $('chk-grid'),
   chkFollow: () => $('chk-follow'),
+  chkEnergy: () => $('chk-energy'),
+
+  // 에너지 그래프
+  energyPanel: () => $('energy-panel'),
+  energyCanvas: () => $('energy-canvas'),
+  energyK: () => $('e-k'),
+  energyU: () => $('e-u'),
+  energyE: () => $('e-t'),
 
   // 모바일 레이아웃 계산용
   ctrlPanel: () => document.querySelector('.ctrl-panel'),

@@ -42,14 +42,14 @@ src/
       SurfaceMode.js  지표면 모드 (준궤도 발사 전담)
       index.js        모드 레지스트리 = 라우팅 우선순위
   core/               상수 · 이벤트버스 · 루프 · 벡터 · 포매터
-  physics/            중력장 · 적분기 · 케플러 궤도요소   ← DOM 을 전혀 모름
+  physics/            중력장 · 적분기 · 케플러 궤도요소 · 에너지   ← DOM 을 전혀 모름
   sim/                ProjectileSim · Trail · FlightResult · launchState · predict
   render/             Renderer · Viewport · Camera · palette · zoomPolicy
     projections/      반지름 매핑 (화면 성격을 결정하는 핵심 축)
     layers/           16개 레이어 — 각자 그리기만 함
     surfaceView.js    지표면 화면 기하 헬퍼
   fx/                 파티클 · 발사 이펙트 · 폭발 이펙트
-  ui/                 dom · hud · controls · hotkeys · mobileLayout
+  ui/                 dom · hud · energyGraph · controls · hotkeys · mobileLayout
   data/               대륙 폴리곤
 ```
 
@@ -148,6 +148,22 @@ EventBus ──► App  (유일한 상태 소유자: config / display)
 
 파티클(`fx/ParticleSystem`)도 같은 이유로 월드 기준점 + 화면 오프셋으로 바꿔, 카메라가 달려가도
 발사 연기가 발사대에 붙어 있고 줌에 맞춰 줄어듭니다.
+
+### 에너지 그래프
+
+`ui/energyGraph.js` 는 시뮬레이션 캔버스가 아니라 **별도의 작은 DOM 캔버스**에 그립니다.
+레이어 파이프라인에 넣지 않은 이유는 두 가지입니다 — 카메라·투영과 무관한 UI 이고,
+`.ui` 의 자식이라 earthLocator 의 창이 알아서 이 패널을 피해 가기 때문입니다.
+
+값은 `physics/energy.js` 의 `specificEnergy(pos, vel)` — 단위 질량당(J/kg) K, U, E 입니다.
+질량을 가정하지 않은 이유: 궤도가 질량과 무관하므로 m 을 곱하면 세 값이 같은 배율로 커질 뿐입니다.
+
+표본은 링버퍼가 아니라 **적응형 솎기**로 모읍니다. 240점을 넘으면 절반으로 솎고 기록 간격을
+두 배로 늘립니다. 그래서 90분짜리 원궤도든 59일짜리 고타원이든 **비행 전체가 항상 한 화면**에
+들어오고, 점 개수는 240 이하로 유지됩니다.
+
+y 범위는 데이터에 맞추되 **0 을 반드시 포함**시킵니다. E 의 부호가 곧 궤도의 운명이라
+(E < 0 속박 / E > 0 탈출) 0 선과의 위아래 관계가 이 그래프의 핵심이기 때문입니다.
 
 ### 탈출 판정
 

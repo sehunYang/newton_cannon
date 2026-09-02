@@ -1,0 +1,30 @@
+/* 좌측 에너지 그래프 패널 (운동 · 퍼텐셜 · 역학적) */
+
+.energy-panel {
+  position:absolute; left:22px; bottom:104px; width:270px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:14px; padding:12px 14px 10px;
+  backdrop-filter:blur(16px); box-shadow:0 4px 32px rgba(0,0,0,0.4);
+  pointer-events:none; /* 그래프는 읽기 전용 — 뒤의 캔버스 조작을 막지 않습니다 */
+}
+.energy-panel.hidden { display:none; }
+
+.energy-title {
+  font-family:'Space Mono',monospace; font-size:10px;
+  letter-spacing:0.16em; color:var(--accent);
+  margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:6px;
+}
+
+#energy-canvas { display:block; width:100%; height:112px; }
+
+.energy-legend {
+  display:flex; justify-content:space-between; gap:8px;
+  margin-top:8px; font-size:11px; color:var(--dim);
+}
+.energy-legend b {
+  display:block; font-family:'Space Mono',monospace; font-size:12px; font-weight:400;
+}
+/* 그래프 선 색과 같은 색 (energyGraph.js 의 COLOR) */
+.energy-legend .e-k, .energy-legend .e-k b { color:var(--warn); }
+.energy-legend .e-u, .energy-legend .e-u b { color:var(--accent); }
+.energy-legend .e-t, .energy-legend .e-t b { color:var(--accent2); }

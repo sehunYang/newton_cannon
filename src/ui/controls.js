@@ -41,6 +41,9 @@ export function bindControls(bus, initial) {
   els.chkFollow().addEventListener('change', (e) => {
     bus.emit(EV.DISPLAY_CHANGED, { followCam: e.target.checked });
   });
+  els.chkEnergy().addEventListener('change', (e) => {
+    bus.emit(EV.DISPLAY_CHANGED, { showEnergy: e.target.checked });
+  });
 
   els.btnFire().addEventListener('click', () => bus.emit(EV.LAUNCH_REQUESTED));
   els.btnReset().addEventListener('click', () => bus.emit(EV.RESET_REQUESTED));
@@ -113,8 +116,11 @@ export function setFireButtonLaunched(launched) {
 }
 
 /** 체크박스 상태를 화면 옵션과 맞춥니다(단축키로 바꿨을 때) */
-export function syncDisplayToggles({ showTrail, showGrid, followCam }) {
+export function syncDisplayToggles({ showTrail, showGrid, followCam, showEnergy }) {
   els.chkTrail().checked = showTrail;
   els.chkGrid().checked = showGrid;
   els.chkFollow().checked = followCam !== false;
+  els.chkEnergy().checked = showEnergy !== false;
+  // 패널은 CSS(모바일 세로 숨김)와 충돌하지 않도록 클래스로만 끕니다
+  els.energyPanel().classList.toggle('hidden', showEnergy === false);
 }

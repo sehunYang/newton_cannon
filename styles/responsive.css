@@ -45,6 +45,7 @@
   .hud-value { font-size: 11px; }
   .orbit-badge { font-size: 10px; padding: 2px 7px; }
   #hud-stats { display: none !important; } /* 통계는 모바일 세로에서 숨김 */
+  .energy-panel { display: none !important; } /* 에너지 그래프도 (자리가 없습니다) */
 
   /* 컨트롤 패널: 하단 전체 너비
      position:fixed — iOS Safari vh 버그 우회, 항상 실제 뷰포트 기준 배치 */
@@ -132,6 +133,7 @@
   .hud-label, .hud-value { font-size: 10px; }
   .orbit-badge { font-size: 9px; padding: 2px 6px; }
   #hud-stats { display: none !important; }
+  .energy-panel { display: none !important; }
 
   .ctrl-panel {
     bottom: 0; right: 0;

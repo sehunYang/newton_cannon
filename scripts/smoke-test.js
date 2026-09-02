@@ -222,5 +222,41 @@ app.frame(1 / 60, 0);
 check('HUD 가 이월 결과 표시', document.getElementById('hud-impang').textContent === '33.3°',
   document.getElementById('hud-impang').textContent);
 
+// ═══ [8] 에너지 — 물리량과 그래프 표본 ═══
+console.log('');
+console.log('[8] 에너지 (운동·퍼텐셜·역학적)');
+const { specificEnergy } = await import('../src/physics/energy.js');
+const { GM: GM8, R_EARTH: RE8, V1: V18, V2: V28 } = await import('../src/core/constants.js');
+
+// 지표면에서 정지: K = 0, U = −GM/R
+const rest = specificEnergy({ x: 0, y: RE8 }, { x: 0, y: 0 });
+check('정지 상태 K = 0', rest.k === 0);
+check('퍼텐셜 U = −GM/R', Math.abs(rest.u + GM8 / RE8) < 1, `${(rest.u / 1e6).toFixed(1)} MJ/kg`);
+
+// 제1 우주속도(원궤도): K = −U/2, E = U/2  (비리얼 정리)
+const circ = specificEnergy({ x: 0, y: RE8 }, { x: V18, y: 0 });
+check('원궤도에서 K = −U/2 (비리얼 정리)', Math.abs(circ.k + circ.u / 2) / circ.k < 2e-3);
+check('원궤도는 E < 0 (속박)', circ.e < 0, `${(circ.e / 1e6).toFixed(1)} MJ/kg`);
+
+// 제2 우주속도: E = 0 이 그 정의
+const esc = specificEnergy({ x: 0, y: RE8 }, { x: V28, y: 0 });
+check('탈출 속도에서 E = 0', Math.abs(esc.e) / esc.k < 2e-3, `${(esc.e / 1e6).toFixed(3)} MJ/kg`);
+check('탈출 속도 초과면 E > 0', specificEnergy({ x: 0, y: RE8 }, { x: V28 * 1.05, y: 0 }).e > 0);
+
+// 그래프: 발사하면 표본이 쌓이고 역학적 에너지가 보존되어야 합니다
+app.reset();
+app.config.initSpeed = 9000; app.config.angleDeg = 0; app.config.timeScale = 32;
+app.launch();
+run(300);
+const ep = app.energy.points;
+check('그래프 표본 수집', ep.length > 20, `${ep.length}점`);
+check('표본 수 상한 유지', ep.length <= 240, `${ep.length}점`);
+const eArr = ep.map((q) => q.e);
+const drift = (Math.max(...eArr) - Math.min(...eArr)) / Math.abs(eArr[0]);
+check('역학적 에너지 보존 (드리프트 < 0.1%)', drift < 1e-3, `${(drift * 100).toExponential(1)}%`);
+check('K + U = E', ep.every((q) => Math.abs(q.k + q.u - q.e) < 1));
+app.reset();
+check('리셋하면 그래프도 비워짐', app.energy.points.length === 0);
+
 console.log(fail.length === 0 ? '\n✅ 전체 통과' : `\n❌ 실패 ${fail.length}건: ${fail.join(', ')}`);
 process.exit(fail.length ? 1 : 0);

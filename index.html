@@ -10,8 +10,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
 
-<!-- 빈 favicon: 없으면 브라우저가 /favicon.ico 를 요청해 404 를 남깁니다 -->
-<link rel="icon" href="data:,">
+<!-- 파비콘: 다른 shy.ai.kr 사이트와 같은 로고 (원본 로고를 180px 로 줄여 21 KB) -->
+<link rel="icon" type="image/png" href="./favicon.png?v=1">
+<link rel="apple-touch-icon" href="./favicon.png?v=1">
 
 <link rel="stylesheet" href="./styles/index.css">
 </head>
@@ -114,6 +115,17 @@
       </div>
     </div>
 
+    <!-- 에너지 그래프 (좌측, 발사 버튼 위) -->
+    <div class="energy-panel" id="energy-panel">
+      <div class="energy-title">Energy · MJ/kg</div>
+      <canvas id="energy-canvas"></canvas>
+      <div class="energy-legend">
+        <span class="e-k">운동 <b id="e-k">—</b></span>
+        <span class="e-u">퍼텐셜 <b id="e-u">—</b></span>
+        <span class="e-t">역학적 <b id="e-t">—</b></span>
+      </div>
+    </div>
+
     <!-- 발사/리셋 버튼 (좌하단) -->
     <div class="btn-group">
       <button class="btn btn-fire" id="btn-fire">🚀 발사</button>
@@ -134,10 +146,14 @@
         <input type="checkbox" id="chk-follow" checked>
         <span class="check-box"></span>포탄 추적
       </label>
+      <label class="check-item" title="운동·퍼텐셜·역학적 에너지를 실시간 그래프로 (모바일 세로에서는 숨김)">
+        <input type="checkbox" id="chk-energy" checked>
+        <span class="check-box"></span>에너지 그래프
+      </label>
     </div>
 
     <div class="shortcut-hint">
-      <span>Space: 발사 / R: 리셋 / G: 격자 / F: 추적 / 1·2·3·4: 시뮬속도</span>
+      <span>Space: 발사 / R: 리셋 / G: 격자 / F: 추적 / E: 에너지 / 1·2·3·4: 시뮬속도</span>
     </div>
 
   </div><!-- /.ui -->
