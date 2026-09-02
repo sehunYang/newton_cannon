@@ -89,7 +89,8 @@ console.log('\n[2] 저속 발사 (4 km/s, 45°) → 지표면 모드');
 app.config.initSpeed = 4000; app.config.angleDeg = 45; app.config.timeScale = 8;
 app.launch();
 check('지표면 모드로 라우팅', app.router.current.id === 'surface');
-check('리얼타임(×1) 강제', app.config.timeScale === 1);
+check('비행시간에 맞춘 기본 배속', app.config.timeScale === 32,
+  `×${app.config.timeScale} (12분 비행 → 화면 23초)`);
 check('모드 배지 표시', document.getElementById('mode-badge').style.display === 'flex');
 check('발사 직후 active', app.router.current.sim.active);
 check('축척이 궤적에 맞춰짐', app.router.current.metersPerPixel > 100,

@@ -136,14 +136,10 @@ export class App {
       setTimeScale(mult);
     });
 
-    // 모드마다 어울리는 시간 정책이 다릅니다.
-    // 궤도는 배속(90분 주기를 몇 초에), 지표면은 리얼타임.
+    // 화면이 바뀌면 일단 사용자가 고른 배속으로 되돌립니다.
+    // (지표면 모드가 발사마다 제안하는 배속은 launch() 에서 덮어씁니다)
     bus.on(EV.MODE_CHANGED, ({ to }) => {
-      const next = this.router.get(to).preferredTimeScale ?? this.#userTimeScale;
-      if (next !== this.config.timeScale) {
-        this.config.timeScale = next;
-        setTimeScale(next);
-      }
+      this.#setTimeScale(this.#userTimeScale);
       setModeBadge(to);
     });
 
@@ -179,8 +175,22 @@ export class App {
       this.router.switchTo(target.id, { config: this.config, reason: 'launch' });
     }
 
+    // 모드가 이 발사에 어울리는 배속을 제안하면 적용합니다.
+    // 지표면 모드는 비행시간을 미리 알고 있어서, 몇 분짜리 비행도
+    // 화면에서는 25초쯤에 끝나도록 배속을 골라 줍니다.
+    // 사용자가 직접 고른 배속은 #userTimeScale 에 남아 있다가 화면 복귀 시 되돌아옵니다.
+    const preferred = this.router.current.preferredTimeScale?.(launchState);
+    if (preferred) this.#setTimeScale(preferred);
+
     this.router.current.launch(launchState);
     setFireButtonLaunched(true);
+  }
+
+  /** config.timeScale 과 버튼 UI 를 함께 맞춥니다 (사용자 선택 기록은 건드리지 않음) */
+  #setTimeScale(mult) {
+    if (mult === this.config.timeScale) return;
+    this.config.timeScale = mult;
+    setTimeScale(mult);
   }
 
   reset() {

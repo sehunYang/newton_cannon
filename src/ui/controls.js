@@ -21,13 +21,13 @@ export function bindControls(bus, initial) {
   syncSpeedLabel(initial.initSpeed);
 
   sAng.addEventListener('input', () => {
-    const angleDeg = parseInt(sAng.value, 10);
+    const angleDeg = parseFloat(sAng.value);
     syncAngleLabel(angleDeg);
     bus.emit(EV.CONFIG_CHANGED, { angleDeg });
   });
 
   sSpd.addEventListener('input', () => {
-    const initSpeed = parseInt(sSpd.value, 10);
+    const initSpeed = parseFloat(sSpd.value);
     syncSpeedLabel(initSpeed);
     bus.emit(EV.CONFIG_CHANGED, { initSpeed });
   });
@@ -52,7 +52,8 @@ export function bindControls(bus, initial) {
 }
 
 function syncAngleLabel(angleDeg) {
-  els.valAngle().textContent = angleDeg + '°';
+  // 눈금이 0.5° 라 항상 소수 첫째 자리까지 — 자릿수가 흔들리면 패널이 들썩입니다
+  els.valAngle().textContent = angleDeg.toFixed(1) + '°';
 }
 
 function syncSpeedLabel(initSpeed) {

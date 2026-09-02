@@ -19,4 +19,5 @@ export function fmtTime(s) {
 }
 
 export const fmtSpeed = (v) => v.toFixed(0) + ' m/s';
-export const fmtSpeedKms = (v) => (v / 1000).toFixed(1) + ' km/s';
+/** 슬라이더 눈금이 50 m/s 라 소수 둘째 자리까지 보여줍니다 */
+export const fmtSpeedKms = (v) => (v / 1000).toFixed(2) + ' km/s';

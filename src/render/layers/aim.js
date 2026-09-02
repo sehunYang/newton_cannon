@@ -52,7 +52,7 @@ export const aimLayer = {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    if (Math.abs(angleDeg) > 0.5) {
+    if (Math.abs(angleDeg) > 0.25) {  // 최소 눈금(0.5°)에서도 호가 그려지도록
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.arc(0, 0, arcR, Math.min(horizAngle, fireAngle), Math.max(horizAngle, fireAngle));
@@ -74,7 +74,7 @@ export const aimLayer = {
       ctx.fillStyle = 'rgba(126,240,200,0.85)';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(angleDeg + '°', Math.cos(midA) * lblR, Math.sin(midA) * lblR);
+      ctx.fillText(angleDeg.toFixed(1) + '°', Math.cos(midA) * lblR, Math.sin(midA) * lblR);
     }
 
     // 포구 pivot 점

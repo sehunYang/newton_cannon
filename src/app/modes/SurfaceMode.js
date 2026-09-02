@@ -62,6 +62,30 @@ const FRAME = {
 /** 한 프레임에서 허용할 최대 물리 스텝 (배속을 높여도 프레임이 멈추지 않게) */
 const MAX_STEPS_PER_FRAME = 1500;
 
+/**
+ * 비행 한 번이 화면에서 이 시간을 넘지 않도록 기본 배속을 고릅니다 (초).
+ *
+ * 왜 필요한가: 탄도 비행은 실제로 몇 분씩 걸립니다
+ * (2.5 km/s 발사 = 6.6분, 4 km/s = 12분). 물리적으로는 정직하지만
+ * 수업에서 12분을 기다릴 수는 없습니다.
+ */
+const MAX_WALL_SECONDS = 40;
+
+/** 시뮬 속도 버튼과 같은 선택지 — 버튼 UI 와 어긋나지 않게 */
+const SCALE_CHOICES = [1, 8, 32, 128];
+
+/**
+ * '화면에서 MAX_WALL_SECONDS 를 넘지 않는 가장 느린 배속'을 고릅니다.
+ *
+ * 가장 느린 쪽을 고르는 이유: 느릴수록 학생이 운동을 따라가기 좋습니다.
+ * 그래서 40초 안에 끝나는 짧은 발사는 ×1 리얼타임 그대로 재생되고,
+ * 긴 발사만 필요한 만큼 빨라집니다.
+ */
+function scaleForDuration(durationSec) {
+  return SCALE_CHOICES.find((s) => durationSec / s <= MAX_WALL_SECONDS)
+    ?? SCALE_CHOICES[SCALE_CHOICES.length - 1];
+}
+
 export function createSurfaceMode() {
   const projection = createSurfaceProjection({ metersPerPixel: 200 });
 
@@ -91,8 +115,10 @@ export function createSurfaceMode() {
   ];
 
   let ctx = null;
-  /** 현재 비행의 궤적 예측 — 프레이밍의 근거 */
+  /** 현재 비행의 궤적 예측 — 프레이밍과 기본 배속의 근거 */
   let prediction = null;
+  /** 아직 물리로 소비하지 못한 시간 (초). 리얼타임 정확도의 핵심 */
+  let pending = 0;
 
   /**
    * 예측 캐시.
@@ -114,8 +140,17 @@ export function createSurfaceMode() {
     /** 레이어가 축척을 읽어갑니다 (mode.metersPerPixel) */
     get metersPerPixel() { return projection.metersPerPixel; },
 
-    /** ★ 요구사항: 시간은 리얼타임으로 흐릅니다 */
-    preferredTimeScale: 1,
+    /**
+     * 이 발사에 어울리는 기본 배속.
+     *
+     * 물리는 언제나 리얼타임 기준으로 계산되고(1초 = 1초), 배속은 그 시간을
+     * 몇 배로 빨리 감아 보여줄지일 뿐입니다. 짧은 비행은 ×1 그대로,
+     * 몇 분짜리 비행은 25초 안에 끝나도록 자동으로 올려 줍니다.
+     * 학생이 시뮬속도 버튼으로 언제든 ×1 리얼타임으로 되돌릴 수 있습니다.
+     */
+    preferredTimeScale(launchState) {
+      return scaleForDuration(predictFor(launchState).duration);
+    },
 
     /**
      * 이 모드가 처리할 발사인가.
@@ -149,6 +184,7 @@ export function createSurfaceMode() {
       applyFraming(ctx.vp, ctx.cam);
       // ③ 궤적 기록은 화면 해상도에 맞춰 2px 간격으로
       sim.trail.minSpacing = projection.metersPerPixel * 2;
+      pending = 0;
 
       sim.launch(launchState);
       ctx.fx.launch.trigger(ctx.vp, launchState.config.angleDeg);
@@ -157,6 +193,7 @@ export function createSurfaceMode() {
     reset() {
       sim.reset();
       prediction = null;
+      pending = 0;
       trailLayer.invalidate();
     },
 
@@ -179,10 +216,23 @@ export function createSurfaceMode() {
       // 리사이즈에도 프레이밍이 유지되도록 매 프레임 다시 적용합니다 (연산은 몇 줄)
       applyFraming(vp, cam);
 
-      // 리얼타임: 이번 프레임에 흐른 시간만큼만 물리를 전진시킵니다.
-      // (궤도 모드처럼 프레임당 고정 스텝 수를 쓰지 않는 것이 이 모드의 핵심)
-      const steps = Math.round((dt * config.timeScale) / sim.dt);
-      sim.advance(Math.min(MAX_STEPS_PER_FRAME, Math.max(1, steps)));
+      // ── 리얼타임 재생 ──
+      // 이번 프레임에 흐른 시간만큼만 물리를 전진시킵니다. 프레임 간격이
+      // 적분 간격(1/120초)의 정수배가 아니므로 남는 시간을 다음 프레임으로
+      // 이월해야 합니다. 반올림해 버리면 화면 주사율에 따라 시간이 빨라집니다
+      // (144Hz 에서 20% 빠름). 누적기를 쓰면 어떤 주사율에서도 1.000× 입니다.
+      pending += dt * config.timeScale;
+      let steps = Math.floor(pending / sim.dt);
+
+      if (steps > MAX_STEPS_PER_FRAME) {
+        // 따라잡기를 포기합니다. 밀린 시간을 계속 쌓으면 프레임이 멈춥니다.
+        steps = MAX_STEPS_PER_FRAME;
+        pending = 0;
+      } else {
+        pending -= steps * sim.dt;
+      }
+
+      if (steps > 0) sim.advance(steps);
     },
   };
 

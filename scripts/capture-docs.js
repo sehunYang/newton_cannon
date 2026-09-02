@@ -84,17 +84,13 @@ try {
   await setSlider('#s-ang', 45);
   await setSlider('#s-spd', 3200);
   await wait(600);
-  await page.click('#btn-fire');
-  await wait(300);
-  await page.keyboard.press('3');            // ×32 로 궤적을 빠르게 그린 뒤
+  await page.click('#btn-fire');            // 배속은 비행시간에 맞춰 자동 선택됩니다
   await page.waitForFunction(() => window.__cannon.router.current.sim.groundDistance > 4.5e5,
     null, { timeout: 60000 });
-  await page.keyboard.press('1');            // 리얼타임으로 되돌려 촬영
-  await wait(500);
+  await wait(200);
   await shot('04-surface-flight');
 
   // ⑤ 착지 순간 (곡면 위 충돌)
-  await page.keyboard.press('3');
   await done(90000);
   await wait(280);
   await shot('05-surface-impact');
@@ -112,11 +108,8 @@ try {
   await setSlider('#s-spd', 1800);
   await wait(600);
   await page.click('#btn-fire');
-  await wait(300);
-  await page.keyboard.press('3');
   await page.waitForFunction(() => window.__cannon.router.current.sim.altitude > 6e4,
     null, { timeout: 60000 });
-  await page.keyboard.press('1');
   await page.keyboard.press('g');
   await wait(600);
   await shot('07-surface-grid');

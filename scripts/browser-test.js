@@ -134,15 +134,39 @@ try {
 
   // ═══ [2] 슬라이더 조작 ═══
   console.log('\n[2] 슬라이더 조작');
+  const steps = await page.evaluate(() => ({
+    ang: document.getElementById('s-ang').step,
+    spd: document.getElementById('s-spd').step,
+  }));
+  check('발사각 눈금 0.5°', steps.ang === '0.5', steps.ang);
+  check('초기속도 눈금 50 m/s', steps.spd === '50', steps.spd);
+
+  // 반 눈금 값이 실제로 반영되는지 (parseInt 로 잘리면 여기서 걸립니다)
+  await setSlider('#s-ang', 32.5);
+  await setSlider('#s-spd', 4050);
+  await page.waitForTimeout(200);
+  check('0.5° 단위가 반영됨', (await state()).angleDeg === 32.5, await text('#v-ang'));
+  check('50 m/s 단위가 반영됨', (await state()).initSpeed === 4050, await text('#v-spd'));
+
+  // README 가 안내하는 "슬라이더 클릭 후 방향키로 한 눈금씩" 이 실제로 되는지
+  await page.locator('#s-ang').focus();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(150);
+  check('방향키로 0.5° 한 눈금 이동', (await state()).angleDeg === 33, await text('#v-ang'));
+  await page.locator('#s-spd').focus();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(150);
+  check('방향키로 50 m/s 한 눈금 이동', (await state()).initSpeed === 4100, await text('#v-spd'));
+
   await setSlider('#s-ang', 45);
   await page.waitForTimeout(150);
-  check('발사각 라벨', (await text('#v-ang')) === '45°');
+  check('발사각 라벨 (0.5° 눈금)', (await text('#v-ang')) === '45.0°', await text('#v-ang'));
   check('앱 상태에 반영', (await state()).angleDeg === 45);
   await shot('02-발사각45도');
 
   await setSlider('#s-spd', 8000);
   await page.waitForTimeout(1200);
-  check('속도 라벨', (await text('#v-spd')) === '8.0 km/s');
+  check('속도 라벨 (0.05 km/s 눈금)', (await text('#v-spd')) === '8.00 km/s', await text('#v-spd'));
   check('배지가 궤도로 전환', (await text('#hud-orbit')) === '타원/원 궤도');
   const bg8k = await page.locator('#s-spd').evaluate((e) => e.style.background);
   check('슬라이더 트랙 = 궤도색(파랑)', bg8k.includes('rgb(58, 142, 255)'));
@@ -164,8 +188,8 @@ try {
 
   const s1 = await state();
   check('지표면 모드로 라우팅', s1.mode === 'surface', s1.mode);
-  check('리얼타임(×1) 강제', s1.timeScale === 1, `×${s1.timeScale}`);
-  check('시뮬속도 버튼 ×1 활성', (await text('#simspd-val')) === '×1');
+  check('비행시간에 맞춘 기본 배속', s1.timeScale === 32, `×${s1.timeScale}`);
+  check('시뮬속도 버튼 동기화', (await text('#simspd-val')) === '×32', await text('#simspd-val'));
   check('모드 배지 노출', await page.locator('#mode-badge').isVisible());
   check('모드 배지 문구', (await text('#mode-val')) === '지표면');
   check('축척이 궤적에 맞춰짐', s1.mpp > 100, `${s1.mpp.toFixed(0)} m/px`);
@@ -205,6 +229,22 @@ try {
   await page.waitForTimeout(500);
   const s1b = await state();
   check('궤적이 쌓이는 중', s1b.trailPoints > 5, `${s1b.trailPoints}점`);
+
+  // ── 리얼타임 정확도 ──
+  // ×1 에서 시뮬 시간이 실제 시간과 1:1 로 흘러야 합니다.
+  // 프레임 간격을 반올림해 처리하면 주사율에 따라 최대 25% 어긋납니다.
+  await page.keyboard.press('1');
+  await page.waitForTimeout(300);
+  const t0 = await page.evaluate(() => ({
+    sim: window.__cannon.router.current.sim.elapsed, real: performance.now() }));
+  await page.waitForTimeout(4000);
+  const t1 = await page.evaluate(() => ({
+    sim: window.__cannon.router.current.sim.elapsed, real: performance.now() }));
+  const ratio = (t1.sim - t0.sim) / ((t1.real - t0.real) / 1000);
+  check('×1 에서 시뮬 시간 = 실제 시간', Math.abs(ratio - 1) < 0.02,
+    `비율 ${ratio.toFixed(3)}`);
+  await page.keyboard.press('4');  // 측정 끝 — 다시 빨리감기
+  await page.waitForTimeout(150);
   check('사거리 실시간 갱신', (await text('#hud-dist')) !== '—', await text('#hud-dist'));
   check('발사 버튼 상태 변경', (await text('#btn-fire')).includes('비행 중'));
   check('발사 이펙트 파티클', s1.particles > 0, `${s1.particles}개`);
