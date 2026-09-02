@@ -105,36 +105,49 @@ EventBus ──► App  (유일한 상태 소유자: config / display)
 | 적분 간격 | 2 초 | 1/120 초 |
 | 시간 진행 | 프레임당 고정 스텝 수 | **실제 경과 시간 기준** (누적기) |
 | 기본 배속 | 사용자 선택 유지 | 비행시간에 맞춰 자동 (`preferredTimeScale(launchState)`) |
-| 투영 | `RadialLinearProjection` (실제 축척, 기본) / `RadialLogProjection` (압축 보기, `L`) | `SurfaceProjection` (선형) |
+| 투영 | `RadialLinearProjection` (실제 축척) | `SurfaceProjection` (선형) |
 
-### 궤도 모드의 두 투영과 줌 정책
+### 궤도 모드의 투영과 시점 정책
 
-`RadialLogProjection` 은 지표 근처는 선형, 먼 곳은 로그로 눌러 80 Re 까지 한 화면에
-담지만, 반지름을 비선형으로 바꾸므로 **타원이 타원으로 보이지 않습니다**(원지점/근지점 화면 비율
-3.08 vs 실제 4.01, 초점이 지구에서 벗어남). 물리는 정확한데 그림이 틀리는 상황이라
-`RadialLinearProjection` (`rPx = rSurfacePx · r / R_EARTH`)을 기본으로 두고, 로그 투영은
-`display.trueScale=false` 일 때만 씁니다. `OrbitalMode.syncProjection` 이 매 프레임 `display` 와
-비교해 갈아끼우고 궤적 캐시를 비웁니다.
+투영은 `RadialLinearProjection` (`rPx = rSurfacePx · r / R_EARTH`) 하나뿐입니다. 화면이 월드의
+순수한 확대·축소라 궤적이 화면에서도 정확한 원뿔곡선이고 지구가 그 초점에 놓입니다.
 
-줌·카메라는 투영에 따라 다릅니다(`render/zoomPolicy.js`, `OrbitalMode.policyZoom`).
-- 압축 보기: `speedToZoom(initSpeed)` / 비행 중 `altToZoom(r)` 과의 min. 카메라는 화면 밖 clamp.
-- 실제 축척 — 세 단계로 나뉩니다.
-  1. 발사 전: 줌 1, 지구 중앙.
-  2. 비행 중: **카메라가 포탄을 따라가고** 줌은 `followZoom(r) = min(1, √(1.5 Re / r))`.
-     궤도 전체를 미리 넣지 않고 거리의 제곱근으로만 물러나서 "떠나는 느낌"을 남깁니다.
-     clamp 는 끄므로 지구가 화면 밖으로 나갈 수 있고, 그때 `earthLocator` 레이어가
-     지구 방향 가장자리에 둥근 창(미니 지구 + 거리)을 띄웁니다. 창이 DOM 오버레이(타이틀·HUD·패널)와
-     겹치면 같은 가장자리를 따라 비켜섭니다(`.ui > *` 의 사각형을 읽음).
-  3. `display.followCam` 을 끄면(`F` / 포탄 추적 체크 해제) 지구를 중앙에 두고 `fitZoomForOrbit` 으로
-     **타원 전체**(원지점이 화면의 80% 안)를, 비속박이면 `fitZoomForRadius(r·1.05)` 를 보여 줍니다.
-     착탄·탈출 뒤에는 `fitZoomForRadius(R_EARTH + maxAlt)`.
-  압축 보기에서는 좌상단에 `축척 압축 · 모양 왜곡` 경고 배지(`#scale-badge`)가 뜹니다 —
-  로그 반지름은 먼 타원의 원지점 쪽을 뾰족한 달걀꼴로 만들기 때문입니다.
+예전에는 먼 거리를 로그로 눌러 80 Re 까지 담는 `RadialLogProjection` 도 있었지만 지웠습니다.
+반지름을 비선형으로 바꾸니 **타원이 타원으로 보이지 않았고**(원지점/근지점 화면 비율 3.08 vs 실제
+4.01, 초점이 지구에서 벗어남, 원지점 쪽이 뾰족한 달걀꼴), 물리는 맞는데 그림이 틀리는 상황이었습니다.
+**멀리 보는 일은 눈금을 왜곡할 게 아니라 카메라를 물리면 됩니다** — 그게 아래 정책입니다.
 
-  추적 카메라(`Camera.update`)는 대상의 프레임당 이동량을 그대로 실어 나르고 **오프셋만** lerp 합니다
-  (feed-forward). 단순 lerp 는 정상 상태에서도 속도에 비례한 지연이 남아 ×128 근지점에서 포탄이
-  화면 중앙을 수백 px 벗어났습니다. 파티클(`fx/ParticleSystem`)도 같은 이유로 월드 기준점 +
-  화면 오프셋으로 바꿔, 카메라가 달려가도 발사 연기가 발사대에 붙어 있고 줌에 맞춰 줄어듭니다.
+시점은 `render/zoomPolicy.js` + `OrbitalMode.currentView` 가 `{ kind, zoom, center }` 로 답합니다
+(center 가 null 이면 지구가 화면 한가운데).
+
+| kind | 언제 | 줌 | 카메라 중심 |
+|---|---|---|---|
+| `idle` | 발사 전 | 1 | 지구 |
+| `ball` | 비행 중 + 포탄 추적(기본) | `followZoom(r) = min(1, √(1.5 Re / r))` | 포탄 |
+| `orbit` | 비행 중 + 추적 끔(`F`) | `fitOrbitView` | 타원의 중심 |
+| `result` | 착탄·탈출 후 | `fitOrbitView`(탈출) / `fitRadiusView`(착탄) | 상자 중심 |
+
+`fitOrbitView` 는 **타원의 경계 상자**에 맞춥니다. 지구(초점)를 중앙에 두고 원지점 반지름의 '원'에
+맞추면 길쭉한 궤도일수록 화면이 텅 빕니다 — e = 0.97 이면 타원의 폭이 길이의 1/4 이라 궤적이
+가운데 얇은 조각으로 남습니다. 상자에 맞추면 같은 궤도가 3~4배 크게 들어오고, 그 대신 지구는
+초점이므로 화면 중앙에서 비켜 앉습니다(그게 사실입니다). 이심률 벡터가 필요해
+`orbitalElements` 가 `ex, ey` 를 함께 돌려줍니다. 탈출 궤도는 원지점이 없으므로 지구와 포탄을
+함께 담는 상자를 씁니다.
+
+카메라는 `clamp` 없이 씁니다. 지구가 화면 밖으로 나가는 건 정상이고, 그때 `earthLocator` 레이어가
+지구 방향 가장자리에 둥근 창(미니 지구 + 거리)을 띄웁니다. 창이 DOM 오버레이(타이틀·HUD·패널)와
+겹치면 같은 가장자리를 따라 비켜섭니다 — `.ui > *` 의 사각형을 읽되 `getBoundingClientRect` 는
+강제 레이아웃을 부르므로 0.5초 캐시를 둡니다.
+
+추적이 매끄러우려면 두 가지가 필요했습니다.
+- **물리를 카메라보다 먼저** 진행합니다. 반대로 하면 카메라는 한 스텝 전 위치에 맞추는데 화면에는
+  진행 후 위치가 그려져 항상 한 프레임 뒤처집니다 — ×128 근지점에서 40 px 이 넘습니다.
+- `Camera.update` 는 대상의 프레임당 이동량을 그대로 실어 나르고 **오프셋만** lerp 합니다
+  (feed-forward). 단순 lerp 는 정상 상태에서도 속도에 비례한 지연이 남습니다. 대상이 바뀌는
+  프레임에는 `retarget()` 으로 feed-forward 를 한 번 끊습니다(순간이동 방지).
+
+파티클(`fx/ParticleSystem`)도 같은 이유로 월드 기준점 + 화면 오프셋으로 바꿔, 카메라가 달려가도
+발사 연기가 발사대에 붙어 있고 줌에 맞춰 줄어듭니다.
 
 ### 탈출 판정
 

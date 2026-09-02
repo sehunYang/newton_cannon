@@ -38,9 +38,6 @@ export function bindControls(bus, initial) {
   els.chkGrid().addEventListener('change', (e) => {
     bus.emit(EV.DISPLAY_CHANGED, { showGrid: e.target.checked });
   });
-  els.chkScale().addEventListener('change', (e) => {
-    bus.emit(EV.DISPLAY_CHANGED, { trueScale: e.target.checked });
-  });
   els.chkFollow().addEventListener('change', (e) => {
     bus.emit(EV.DISPLAY_CHANGED, { followCam: e.target.checked });
   });
@@ -115,12 +112,9 @@ export function setFireButtonLaunched(launched) {
   btn.textContent = launched ? '⏳ 비행 중' : '🚀 발사';
 }
 
-/** 체크박스·배지 상태를 화면 옵션과 맞춥니다(단축키로 바꿨을 때) */
-export function syncDisplayToggles({ showTrail, showGrid, trueScale, followCam }) {
+/** 체크박스 상태를 화면 옵션과 맞춥니다(단축키로 바꿨을 때) */
+export function syncDisplayToggles({ showTrail, showGrid, followCam }) {
   els.chkTrail().checked = showTrail;
   els.chkGrid().checked = showGrid;
-  els.chkScale().checked = trueScale !== false;
   els.chkFollow().checked = followCam !== false;
-  // 압축 보기는 궤도 모양이 왜곡되므로 화면에 경고 배지를 띄웁니다
-  els.scaleBadge().style.display = trueScale === false ? 'flex' : 'none';
 }

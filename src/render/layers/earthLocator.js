@@ -17,14 +17,22 @@ const MARGIN = 14;   // 화면 가장자리에서 창까지의 여백 (px)
 const FADE_PX = 90;  // 지구가 화면 밖으로 이만큼 더 나갈 때까지 페이드 인
 const LABEL_H = 28;  // 창 아래(또는 위) 거리 라벨이 차지하는 높이
 
-/** 화면을 덮고 있는 UI 오버레이들의 사각형 (보이는 것만) — 캔버스는 (0,0) 원점이라 좌표계가 같습니다 */
-function overlayRects() {
+/**
+ * 화면을 덮고 있는 UI 오버레이들의 사각형 (보이는 것만) — 캔버스는 (0,0) 원점이라 좌표계가 같습니다.
+ *
+ * getBoundingClientRect 는 강제 레이아웃을 유발하므로 매 프레임 부르지 않고 캐시합니다.
+ * 패널은 리사이즈·모드 전환 때나 움직이니 0.5초 간격이면 충분합니다.
+ */
+let rectCache = { at: -1e9, rects: [] };
+function overlayRects(now) {
   if (typeof document === 'undefined') return [];
+  if (now - rectCache.at < 500) return rectCache.rects;
   const out = [];
   for (const el of document.querySelectorAll('.ui > *')) {
     const b = el.getBoundingClientRect();
     if (b.width > 0 && b.height > 0) out.push({ x0: b.left, y0: b.top, x1: b.right, y1: b.bottom });
   }
+  rectCache = { at: now, rects: out };
   return out;
 }
 
@@ -60,7 +68,7 @@ export const earthLocatorLayer = {
   /** 마지막으로 그린 창의 위치·반지름 (안 그렸으면 null) — 테스트·디버깅용 */
   last: null,
 
-  draw({ ctx, vp, W, H }) {
+  draw({ ctx, vp, W, H, now }) {
     this.last = null;
     // 지구 원판(대기 글로우 포함)이 화면 사각형 밖으로 얼마나 나갔는가
     const earthR = vp.rSurfacePx * 1.15;
@@ -81,7 +89,7 @@ export const earthLocatorLayer = {
     const onTopBottom = tY <= tX; // 위/아래 가장자리에 닿았는가
     const [px, py] = slideClear(mx + c * t, my + s * t, r, onTopBottom,
       onTopBottom ? { cx: mx, cy: my, half: halfW } : { cx: mx, cy: my, half: halfH },
-      overlayRects());
+      overlayRects(now));
     this.last = { x: px, y: py, r };
 
     ctx.save();

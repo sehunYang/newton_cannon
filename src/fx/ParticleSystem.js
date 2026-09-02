@@ -91,6 +91,7 @@ export class ParticleSystem {
 
   /** @param {Viewport} vp 기준점을 다시 투영할 뷰포트 */
   updateAndDraw(ctx, vp) {
+    const draw = { x: 0, y: 0, size: 0, life: 1 }; // 렌더러에 넘길 재사용 객체 (할당 없음)
     ctx.save();
     for (let i = this.items.length - 1; i >= 0; i--) {
       const p = this.items[i];
@@ -99,13 +100,14 @@ export class ParticleSystem {
       p.vy += p.gravity;
       p.life -= p.decay;
       if (p.life <= 0) { this.items.splice(i, 1); continue; }
+      // 기준점을 다시 투영해 화면 좌표를 만듭니다(캔버스 변환 없이 — 매 파티클 save/restore 는 비쌉니다)
       const anchor = vp.worldToScreen(p.worldX, p.worldY);
       const k = Math.min(1, vp.uiScale / p.uiScale0);
-      ctx.save();
-      ctx.translate(anchor.x, anchor.y);
-      ctx.scale(k, k);
-      RENDERERS[p.type]?.(ctx, p, Math.max(0, p.life));
-      ctx.restore();
+      draw.x = anchor.x + p.x * k;
+      draw.y = anchor.y + p.y * k;
+      draw.size = p.size * k;
+      draw.life = p.life;
+      RENDERERS[p.type]?.(ctx, draw, Math.max(0, p.life));
     }
     ctx.restore();
   }

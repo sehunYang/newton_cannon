@@ -59,7 +59,7 @@ const state = () => page.evaluate(() => {
     active: s.active, done: s.done, outcome: s.outcome,
     altitude: s.altitude, altitudeAtEnd: s.altitude, speed: s.speed, elapsed: s.elapsed,
     trailPoints: s.trail.points.length, trailLocked: s.trail.locked,
-    zoom: a.vp.zoom.current, timeScale: a.config.timeScale,
+    zoom: a.vp.zoom.current, projection: a.vp.projection.id, timeScale: a.config.timeScale,
     initSpeed: a.config.initSpeed, angleDeg: a.config.angleDeg,
     display: { ...a.display },
     particles: a.fx.particles.items.length,
@@ -177,8 +177,8 @@ try {
   await page.waitForTimeout(200);
   const bg8k = await page.locator('#s-spd').evaluate((e) => e.style.background);
   check('슬라이더 트랙 = 궤도색(파랑)', bg8k.includes('rgb(58, 142, 255)'));
-  // 실제 축척은 발사 전에 미리 물러나지 않습니다 — 카메라가 발사 후 포탄을 따라갑니다.
-  check('실제 축척이 기본', (await state()).display.trueScale === true);
+  // 투영은 실제 축척(선형) 하나뿐이고, 발사 전에는 미리 물러나지 않습니다.
+  check('실제 축척(선형) 투영', (await state()).projection === 'radial-linear');
   await setSlider('#s-spd', 10000);
   await page.waitForTimeout(800);
   const zoom10k = (await state()).zoom;
@@ -242,18 +242,34 @@ try {
   check('궤적이 쌓이는 중', s1b.trailPoints > 5, `${s1b.trailPoints}점`);
 
   // ── 리얼타임 정확도 ──
-  // ×1 에서 시뮬 시간이 실제 시간과 1:1 로 흘러야 합니다.
+  // ×1 에서 시뮬 시간은 흘러간 프레임 시간과 1:1 이어야 합니다.
   // 프레임 간격을 반올림해 처리하면 주사율에 따라 최대 25% 어긋납니다.
+  //
+  // 기준을 벽시계가 아니라 **프레임 시간의 합**으로 잡는 이유: 앱의 Loop 는 dt 를 0.05초로
+  // 자릅니다(탭 복귀 시 순간이동 방지). 그래서 부하가 걸린 기계에서 프레임이 50 ms 를 넘으면
+  // 시뮬 시간이 벽시계보다 느려지는 게 정상입니다. 여기서 보려는 것은 '반올림 손실이 없는가'
+  // 이므로, 같은 rAF 콜백에서 두 값을 함께 적어 비교합니다(관측 시점 차이가 상쇄됩니다).
   await page.keyboard.press('1');
   await page.waitForTimeout(300);
-  const t0 = await page.evaluate(() => ({
-    sim: window.__cannon.router.current.sim.elapsed, real: performance.now() }));
+  await page.evaluate(() => {
+    window.__rt = [];
+    let last = null, acc = 0;
+    const step = (t) => {
+      if (last !== null) acc += Math.min(0.05, (t - last) / 1000);
+      last = t;
+      window.__rt.push({ acc, sim: window.__cannon.router.current.sim.elapsed });
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
   await page.waitForTimeout(4000);
-  const t1 = await page.evaluate(() => ({
-    sim: window.__cannon.router.current.sim.elapsed, real: performance.now() }));
-  const ratio = (t1.sim - t0.sim) / ((t1.real - t0.real) / 1000);
-  check('×1 에서 시뮬 시간 = 실제 시간', Math.abs(ratio - 1) < 0.02,
-    `비율 ${ratio.toFixed(3)}`);
+  const rt = await page.evaluate(() => {
+    const a = window.__rt;
+    return { n: a.length, dAcc: a[a.length - 1].acc - a[0].acc, dSim: a[a.length - 1].sim - a[0].sim };
+  });
+  const ratio = rt.dSim / rt.dAcc;
+  check('×1 에서 시뮬 시간 = 프레임 시간 (반올림 손실 없음)', Math.abs(ratio - 1) < 0.02,
+    `비율 ${ratio.toFixed(3)} (${rt.n}프레임 / ${rt.dAcc.toFixed(2)}s)`);
   await page.keyboard.press('4');  // 측정 끝 — 다시 빨리감기
   await page.waitForTimeout(150);
   check('사거리 실시간 갱신', (await text('#hud-dist')) !== '—', await text('#hud-dist'));
@@ -396,8 +412,8 @@ try {
   check('1회 공전 후 궤적 잠금', s4b.trailLocked, `${s4b.trailPoints}점`);
   await shot('06-원궤도');
 
-  // ═══ [5b] 실제 축척 — 타원이 정말 타원인가 ═══
-  console.log('\n[5b] 실제 축척 타원 검증 (10000 m/s, 0°)');
+  // ═══ [5b] 화면의 타원이 정말 타원인가 + 궤도 전체 보기 ═══
+  console.log('\n[5b] 타원 검증 (10000 m/s, 0°)');
   await page.keyboard.press('r');
   await page.waitForTimeout(400);
   await setSlider('#s-spd', 10000);
@@ -417,7 +433,8 @@ try {
       offX: b.x - vp.width / 2, offY: b.y - vp.height / 2,
       zoom: vp.zoom.current, rRe: s.radius / 6.371e6,
       earthOffscreen: Math.hypot(vp.ox - nx, vp.oy - ny) > R,
-      camAtEarth: Math.abs(vp.ox - vp.width / 2) < 4 && Math.abs(vp.oy - vp.height / 2) < 4,
+      earthOnScreen: vp.ox > 0 && vp.ox < vp.width && vp.oy > 0 && vp.oy < vp.height,
+      camAtBall: Math.hypot(b.x - vp.width / 2, b.y - vp.height / 2) < 40,
     };
   });
 
@@ -442,7 +459,10 @@ try {
     `오프셋 ${Math.hypot(locked.offX, locked.offY).toFixed(0)} px`);
   await page.keyboard.press('f');
   await page.waitForTimeout(2500);
-  check('F → 추적 해제, 지구 중앙 복귀', (await camState()).camAtEarth);
+  const wide = await camState();
+  check('F → 추적 해제 (카메라가 타원 중심으로 물러남)', !wide.camAtBall,
+    `포탄 오프셋 ${Math.hypot(wide.offX, wide.offY).toFixed(0)} px`);
+  check('물러난 뒤에도 지구는 화면 안', wide.earthOnScreen);
   check('체크박스 동기화 (포탄 추적 해제)', !(await page.$eval('#chk-follow', (el) => el.checked)));
 
   /**
@@ -475,8 +495,12 @@ try {
     for (const { rPx, f } of smp) maxRel = Math.max(maxRel, Math.abs(rPx - pFit * f) / (pFit * f));
     const rs = pts.map((w) => Math.hypot(w.x, w.y));
     const px = smp.map((q) => q.rPx);
+    // 궤적이 화면 가로·세로를 얼마나 채우는가 (경계 상자 맞춤의 효과)
+    const ss = pts.map((w) => vp.worldToScreen(w.x, w.y));
+    const fillW = (Math.max(...ss.map((q) => q.x)) - Math.min(...ss.map((q) => q.x))) / vp.width;
+    const fillH = (Math.max(...ss.map((q) => q.y)) - Math.min(...ss.map((q) => q.y))) / vp.height;
     return {
-      e, maxRel, n: pts.length, inViewFrac: inView / pts.length,
+      e, maxRel, n: pts.length, inViewFrac: inView / pts.length, fillW, fillH,
       worldRatio: Math.max(...rs) / Math.min(...rs),
       screenRatio: Math.max(...px) / Math.min(...px),
       projection: vp.projection.id, zoom: vp.zoom.current,
@@ -491,22 +515,13 @@ try {
   check('원지점/근지점 거리비가 화면에서도 같음', Math.abs(sh.screenRatio - sh.worldRatio) < 0.02,
     `화면 ${sh.screenRatio.toFixed(3)} vs 실제 ${sh.worldRatio.toFixed(3)}`);
   check('타원 전체가 화면 안에', sh.inViewFrac === 1, `${(sh.inViewFrac * 100).toFixed(0)}%`);
-  await shot('06b-실제축척-타원');
-
-  // 압축 보기로 바꾸면 (설계상) 같은 궤적이 타원이 아니게 됩니다
-  await page.keyboard.press('l');
-  await page.waitForTimeout(400);
-  const shLog = await shapeCheck();
-  check('L → 압축 보기(로그 투영)', shLog.projection === 'radial-log', shLog.projection);
-  check('체크박스 동기화 (해제)', !(await page.locator('#chk-scale').isChecked()));
-  check('압축 보기 경고 배지 표시', await page.$eval('#scale-badge', (el) => el.style.display === 'flex'));
-  check('로그 투영에서는 초점이 어긋남 (검증 지표가 왜곡을 잡아냄)', shLog.maxRel > 0.05,
-    `max 잔차 ${(shLog.maxRel * 100).toFixed(1)}%, 거리비 ${shLog.screenRatio.toFixed(2)}`);
-  await shot('06c-압축보기-타원');
-  await page.keyboard.press('l');
-  await page.waitForTimeout(400);
-  check('L → 실제 축척 복귀', (await shapeCheck()).projection === 'radial-linear');
+  // 지구(초점)를 중심으로 원지점 반지름의 '원'에 맞추면 길쭉한 타원이 화면 가운데 얇게 남습니다.
+  // 타원의 경계 상자에 맞추므로 화면을 넉넉히 채워야 합니다.
+  check('궤도가 화면을 충분히 채움 (경계 상자 맞춤)', Math.max(sh.fillW, sh.fillH) > 0.65,
+    `가로 ${(sh.fillW * 100).toFixed(0)}% · 세로 ${(sh.fillH * 100).toFixed(0)}%`);
+  await shot('06b-궤도전체보기');
   await page.keyboard.press('f');
+  await page.waitForTimeout(300);
   check('F → 포탄 추적 복귀', await page.$eval('#chk-follow', (el) => el.checked));
 
   // ═══ [5c] 탈출 속도 미만의 먼 타원 — 지구 위치 표시창 + 에너지 기준 탈출 판정 ═══

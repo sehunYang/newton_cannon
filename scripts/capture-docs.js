@@ -85,18 +85,16 @@ try {
   await wait(300);
   await shot('02b-earth-locator');
 
-  // ③ 탈출 궤도 — 80 Re 까지 가므로 압축 보기(L)로 찍고 되돌립니다
+  // ③ 탈출 궤도 — 지구와 포탄이 함께 들어오도록 물러난 결과 화면
   await reset();
-  await page.keyboard.press('l');
   await setSlider('#s-ang', 45);
   await setSlider('#s-spd', 11600);
   await wait(600);
   await page.keyboard.press('4');
   await page.click('#btn-fire');
   await done(90000);
-  await wait(600);
+  await wait(2500); // 결과 시점(지구~포탄 전체)으로 물러나는 줌이 안정될 때까지
   await shot('03-escape');
-  await page.keyboard.press('l');
 
   console.log('지표면 시점');
   // ④ 지표면 비행 중 — 궤적이 충분히 그려진 뒤 배속을 ×1 로 되돌려 촬영

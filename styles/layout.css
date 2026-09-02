@@ -44,8 +44,3 @@
   box-shadow: 0 2px 12px rgba(0,0,0,0.3), 0 0 14px rgba(126,240,200,0.12);
 }
 .badge-pill.badge-mode b { color: var(--accent2); }
-.badge-pill.badge-warn {
-  border-color: rgba(255,170,80,0.4);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.3), 0 0 14px rgba(255,170,80,0.12);
-}
-.badge-pill.badge-warn b { color: rgba(255,190,110,0.95); }

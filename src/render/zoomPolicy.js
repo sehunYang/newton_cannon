@@ -1,49 +1,25 @@
-import { R_EARTH, H_MOUNT, V1, V2 } from '../core/constants.js';
+import { R_EARTH } from '../core/constants.js';
 import { orbitalElements } from '../physics/orbit.js';
 
 /**
- * 궤도 모드의 줌 정책 — "지금 무엇을 보여줘야 하는가"를 결정합니다.
+ * 궤도 모드의 시점 정책 — "지금 무엇이 화면에 들어와야 하는가"를 줌과 카메라 중심으로 답합니다.
  *
- * 두 투영이 서로 다른 정책을 씁니다.
+ * 투영이 선형(실제 축척) 하나뿐이라 화면은 월드의 순수한 확대·축소입니다.
+ * 그래서 **멀리 보는 일은 눈금을 왜곡할 게 아니라 카메라를 뒤로 물리면 됩니다.**
+ * (예전에는 먼 곳을 로그로 눌러 담았는데, 그러면 타원이 달걀꼴로 일그러졌습니다)
  *
- * ▸ 로그 투영(압축 보기)
- *  - speedToZoom : 발사 전 미리보기. 슬라이더를 올리면 화면이 미리 물러나며
- *                  "이 속도면 이만큼 멀리 간다"를 예고합니다.
- *  - altToZoom   : 비행 중 실제 고도. 포탄이 화면 밖으로 나가지 않게 합니다.
- *  매 프레임 둘 중 **더 넓은 시야**(작은 값)를 택합니다.
+ *  - followZoom    : 비행 중 포탄 추적. 거리에 따라 √ 로 조금씩만 물러납니다.
+ *  - fitOrbitView  : 궤도 전체 보기. 궤도의 **경계 상자**에 맞추고 카메라를 그 상자 중심에 둡니다.
+ *  - fitRadiusView : 착탄 결과 화면 등, 지구 중심 반지름 r 이 들어오면 되는 경우.
  *
- * ▸ 선형 투영(실제 축척)
- *  - followZoom      : 비행 중. 카메라가 포탄을 따라가며 거리에 따라 **조금씩만** 물러납니다.
- *                      지구가 시야에서 벗어나면 earthLocator 레이어가 방향을 알려줍니다.
- *  - fitZoomForOrbit : 추적을 끄면(F) 지구를 중앙에 두고 **타원 전체**가 보이게 물러납니다.
- *                      ("지구가 초점인 타원"을 한눈에 보여줄 때)
- *  - fitZoomForRadius: 착탄·탈출 뒤 궤적 전체(최고 고도까지)가 들어오는 결과 화면.
+ * 뷰는 `{ zoom, center }` 로 돌려줍니다. center 는 화면 한가운데에 놓을 월드 좌표(없으면 지구).
  */
 
-export function speedToZoom(v) {
-  if (v <= V1) return 1.0;
-  if (v <= V2) return 0.6 - 0.3 * ((v - V1) / (V2 - V1)); // 0.60 → 0.30
-  return 0.26;
-}
-
-export function altToZoom(r) {
-  const alt = r - R_EARTH;
-  if (alt <= H_MOUNT * 3) return 1.0;
-  if (alt <= R_EARTH * 0.3) return 0.88;
-  if (alt <= R_EARTH * 0.8) return 0.72;
-  if (alt <= R_EARTH * 1.5) return 0.58;
-  if (alt <= R_EARTH * 3) return 0.44;
-  if (alt <= R_EARTH * 10) return 0.36;
-  if (alt <= R_EARTH * 30) return 0.3;
-  return 0.26; // 30 Re 이상 (제2 우주속도 근처 고타원 궤도)
-}
-
-// ── 실제 축척 ──────────────────────────────────────────────────
-/** 화면 짧은 변의 절반 중 이만큼까지만 궤도가 차지하게 합니다 (여백) */
-const FIT_FRACTION = 0.8; // 아래쪽 체크박스 바·HUD 를 피해 원지점이 놓이도록
-/** 원지점이 지표 근처인 낮은 발사에서도 지구가 화면을 넘지 않게 */
+/** 경계 상자가 화면 가로·세로에서 차지할 최대 비율 (나머지는 HUD·패널 여백) */
+const FIT_W = 0.86; // 좌우는 여백이 넉넉합니다
+const FIT_H = 0.74; // 아래쪽 체크박스·단축키 힌트 줄을 피합니다
+/** 지구가 화면을 넘칠 만큼 확대하지는 않습니다 */
 const MAX_ZOOM = 1.0;
-
 /** 추적 카메라: 이 거리(Re)까지는 줌 1, 그 너머는 √ 로 완만하게 물러남 */
 const FOLLOW_REF = 1.5;
 
@@ -57,23 +33,57 @@ export function followZoom(r) {
 }
 
 /**
- * 반지름 r(m)이 화면 안에 들어오는 줌.
- * 선형 투영에서 rToScreen(r) = baseR·zoom·r/Re 이므로 역산합니다.
+ * 월드 경계 상자 {x0,y0,x1,y1} 를 화면에 맞추는 뷰.
+ * 선형 투영에서 화면 = baseR·zoom/R_EARTH 배이므로 필요한 배율을 그대로 역산합니다.
  */
-export function fitZoomForRadius(r, vp) {
-  const halfMin = Math.min(vp.width, vp.height) / 2;
-  const z = (FIT_FRACTION * halfMin * R_EARTH) / (vp.baseR * r);
-  return Math.min(MAX_ZOOM, z);
+function fitBox(box, vp) {
+  const hx = Math.max((box.x1 - box.x0) / 2, 1);
+  const hy = Math.max((box.y1 - box.y0) / 2, 1);
+  const kx = (FIT_W * vp.width) / (2 * hx);
+  const ky = (FIT_H * vp.height) / (2 * hy);
+  const zoom = Math.min(MAX_ZOOM, (Math.min(kx, ky) * R_EARTH) / vp.baseR);
+  return { zoom, center: { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 } };
+}
+
+/** 지구 원판(반지름 1 Re)을 항상 포함시킵니다 — 시점을 잃지 않도록 */
+const withEarth = (box) => ({
+  x0: Math.min(box.x0, -R_EARTH), y0: Math.min(box.y0, -R_EARTH),
+  x1: Math.max(box.x1, R_EARTH), y1: Math.max(box.y1, R_EARTH),
+});
+
+/** 지구 중심에서 반지름 r 까지가 들어오는 뷰 (지구가 화면 가운데) */
+export function fitRadiusView(r, vp) {
+  const R = Math.max(r, R_EARTH);
+  return fitBox({ x0: -R, y0: -R, x1: R, y1: R }, vp);
 }
 
 /**
- * 발사 초기 상태로부터 "궤도 전체가 보이는" 줌.
- *  - 속박 궤도: 원지점 기준
- *  - 탈출 궤도: 원지점이 없으므로 일단 근지점 부근(2 Re)에서 시작하고,
- *              비행 중에는 fitZoomForRadius 로 따라갑니다.
+ * 궤도 전체가 한눈에 들어오는 뷰.
+ *
+ * 속박 궤도는 **타원의 경계 상자**에 맞춥니다. 지구(초점)를 화면 중앙에 두고 원지점 반지름의
+ * '원'에 맞추던 예전 방식은, 길쭉한 타원일수록 화면이 텅 비었습니다 — e = 0.97 이면 타원의
+ * 폭이 길이의 1/4 이라 궤적이 가운데 얇은 조각으로 남습니다. 상자에 맞추면 같은 궤도가
+ * 3~4배 크게 들어옵니다(그 대신 지구는 초점이므로 화면 중앙에서 비켜 앉습니다 — 그게 사실입니다).
+ *
+ * 탈출 궤도는 원지점이 없으므로 지구와 포탄을 함께 담는 상자를 씁니다.
  */
-export function fitZoomForOrbit({ pos, vel }, vp) {
-  const { bound, apoapsis } = orbitalElements(pos, vel);
-  const rFit = bound && Number.isFinite(apoapsis) ? apoapsis : R_EARTH * 2;
-  return fitZoomForRadius(Math.max(rFit, R_EARTH), vp);
+export function fitOrbitView({ pos, vel }, vp) {
+  const { bound, a, e, ex, ey } = orbitalElements(pos, vel);
+
+  if (!bound || !Number.isFinite(a) || e >= 1) {
+    return fitBox(withEarth({ x0: pos.x, y0: pos.y, x1: pos.x, y1: pos.y }), vp);
+  }
+
+  // 근지점 방향 단위벡터 (원궤도면 e⃗ 가 0 이라 아무 방향이나 무방)
+  const ux = e > 1e-9 ? ex / e : 1;
+  const uy = e > 1e-9 ? ey / e : 0;
+  const b = a * Math.sqrt(Math.max(0, 1 - e * e));
+  // 타원 중심은 초점(지구)에서 원지점 쪽으로 a·e 만큼 떨어져 있습니다
+  const cx = -a * e * ux;
+  const cy = -a * e * uy;
+  // 회전한 타원의 축 정렬 반폭: 장축 a·û 와 단축 b·v̂ (v̂ = û 를 90° 돌린 것)
+  const hx = Math.hypot(a * ux, b * uy);
+  const hy = Math.hypot(a * uy, b * ux);
+
+  return fitBox(withEarth({ x0: cx - hx, y0: cy - hy, x1: cx + hx, y1: cy + hy }), vp);
 }

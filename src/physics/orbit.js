@@ -9,9 +9,11 @@ import { GM, R_EARTH, V1 } from '../core/constants.js';
  * 충돌 여부를 즉시 판정할 수 있습니다. (지표면 모드 라우팅의 근거)
  *
  * @returns {{
- *   energy:number, a:number, e:number, h:number,
+ *   energy:number, a:number, e:number, ex:number, ey:number, h:number,
  *   periapsis:number, apoapsis:number, period:number|null, bound:boolean
  * }}
+ * ex, ey 는 이심률 벡터 — 크기가 e 이고 **근지점 쪽**을 가리킵니다.
+ * 궤도의 '방향'까지 알아야 타원을 화면에 맞춰 그릴 수 있습니다(zoomPolicy.fitOrbitView).
  */
 export function orbitalElements(pos, vel, gm = GM) {
   const r = Math.hypot(pos.x, pos.y);
@@ -26,12 +28,15 @@ export function orbitalElements(pos, vel, gm = GM) {
   const a = Math.abs(energy) < 1e-12 ? Infinity : -gm / (2 * energy);
   // e = √(1 + 2εh²/μ²) — 수치 오차로 음수가 되는 걸 방지
   const e = Math.sqrt(Math.max(0, 1 + (2 * energy * h * h) / (gm * gm)));
+  // 이심률 벡터 e⃗ = (v⃗ × h⃗)/μ − r̂ (2D). 크기는 위의 e 와 같고 방향은 근지점 쪽
+  const ex = (vel.y * h) / gm - pos.x / r;
+  const ey = (-vel.x * h) / gm - pos.y / r;
 
   const periapsis = Number.isFinite(a) ? a * (1 - e) : (h * h) / gm / (1 + e);
   const apoapsis = bound && Number.isFinite(a) ? a * (1 + e) : Infinity;
   const period = bound && Number.isFinite(a) ? 2 * Math.PI * Math.sqrt(a ** 3 / gm) : null;
 
-  return { energy, a, e, h, periapsis, apoapsis, period, bound };
+  return { energy, a, e, ex, ey, h, periapsis, apoapsis, period, bound };
 }
 
 /**

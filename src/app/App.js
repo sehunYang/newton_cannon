@@ -42,7 +42,7 @@ export class App {
   /** 발사 설정 — UI 와 모드가 공유하는 유일한 진실 */
   config = { angleDeg: 0, initSpeed: 4000, timeScale: 8 };
   /** 표시 옵션 */
-  display = { showTrail: true, showGrid: false, trueScale: true, followCam: true };
+  display = { showTrail: true, showGrid: false, followCam: true };
 
   /**
    * 사용자가 마지막으로 고른 배속.

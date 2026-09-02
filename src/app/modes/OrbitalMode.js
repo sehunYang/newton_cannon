@@ -2,11 +2,8 @@ import { DT_ORBITAL, ESCAPE_RADIUS, R_EARTH } from '../../core/constants.js';
 import { ProjectileSim } from '../../sim/ProjectileSim.js';
 import { Trail } from '../../sim/Trail.js';
 import { pointMassGravity } from '../../physics/gravity.js';
-import { RadialLogProjection } from '../../render/projections/RadialLogProjection.js';
 import { RadialLinearProjection } from '../../render/projections/RadialLinearProjection.js';
-import {
-  speedToZoom, altToZoom, followZoom, fitZoomForOrbit, fitZoomForRadius,
-} from '../../render/zoomPolicy.js';
+import { followZoom, fitOrbitView, fitRadiusView } from '../../render/zoomPolicy.js';
 
 import { backgroundLayer } from '../../render/layers/background.js';
 import { createStarsLayer } from '../../render/layers/stars.js';
@@ -28,13 +25,14 @@ import { particlesLayer, explosionLayer } from '../../render/layers/effects.js';
  * 2초 스텝을 진행합니다. 궤도 주기가 90분 이상이라 실시간으로는
  * 아무 일도 일어나지 않기 때문입니다.
  *
- * 투영은 두 가지 중 display.trueScale 로 고릅니다.
- *  - 실제 축척(기본): 궤적이 화면에서도 정확한 원뿔곡선. 지구가 초점에 있습니다.
- *                     카메라가 포탄을 따라가고(followZoom), 비행이 끝나면 지구를 중앙에
- *                     두고 전체가 보이게 물러납니다. display.followCam 을 끄면(F) 비행 중에도
- *                     지구 중앙 + 궤도 전체 보기.
- *  - 압축 보기      : 로그 반지름. 30 Re 탈출까지 한 화면 — 대신 모양은 왜곡됩니다.
- * 줌·카메라 정책도 투영에 따라 다르므로 여기서 함께 고릅니다(zoomPolicy 참고).
+ * 투영은 **실제 축척(선형)** 하나뿐입니다. 화면의 궤적이 곧 정확한 원뿔곡선이고
+ * 지구가 그 초점에 놓입니다. 멀리 있는 궤도는 눈금을 눌러 담는 대신 카메라를 물려서 봅니다.
+ *
+ * 시점은 display.followCam 이 정합니다(zoomPolicy 참고).
+ *  - 켜짐(기본): 카메라가 포탄을 따라가며 거리에 따라 조금씩만 물러납니다.
+ *                지구가 화면 밖으로 나가면 earthLocator 가 방향과 거리를 알려줍니다.
+ *  - 꺼짐(F)   : 궤도 전체가 들어오도록 물러납니다(타원의 경계 상자에 맞춤).
+ * 비행이 끝나면 추적 여부와 무관하게 결과 전체가 보이는 시점으로 물러납니다.
  */
 export function createOrbitalMode() {
   const sim = new ProjectileSim({
@@ -65,59 +63,28 @@ export function createOrbitalMode() {
   ];
 
   let ctx = null;
-  /** 현재 적용된 투영이 실제 축척인지 (display 와 어긋나면 update 에서 갈아끼움) */
-  let trueScale = null;
-
-  const projectionFor = (isTrue) => (isTrue ? RadialLinearProjection : RadialLogProjection);
-
-  /** display.followCam (기본 켬). 끄면 지구를 가운데 두고 궤도 전체를 보여줍니다 */
+  /** display.followCam (기본 켬). 끄면 궤도 전체가 보이도록 물러납니다 */
   let followCam = true;
-
-  /** 실제 축척에서 "궤도 전체 보기" — 지구 중앙 + 궤도(또는 탈출 경로)가 다 들어오는 줌 */
-  const overview = () => trueScale && !followCam;
-
-  /** 발사 전·리셋 시의 줌. 압축 보기는 속도로 미리 물러나고, 실제 축척은 지구를 그대로 둡니다 */
-  function previewZoom(vp, config) {
-    if (!trueScale) return speedToZoom(config.initSpeed);
-    return 1;
-  }
-
-  /** 비행 중 줌 */
-  function flightZoom(vp, config) {
-    if (!trueScale) return Math.min(speedToZoom(config.initSpeed), altToZoom(sim.radius));
-    if (overview()) {
-      return sim.unbound
-        ? fitZoomForRadius(sim.radius * 1.05, vp)
-        : fitZoomForOrbit({ pos: sim.pos, vel: sim.vel }, vp);
-    }
-    return followZoom(sim.radius);
-  }
-
-  /** 착탄·탈출 뒤 결과 화면: 궤적 전체(최고 고도까지)가 보이게. 압축 보기는 그대로 둡니다 */
-  function doneZoom(vp) {
-    if (!trueScale) return vp.zoom.target;
-    return fitZoomForRadius(R_EARTH + sim.stats.maxAlt, vp);
-  }
-
-  /** 지금 상태에서 정책이 원하는 줌 */
-  function policyZoom(vp, config) {
-    if (sim.active) return flightZoom(vp, config);
-    if (sim.done) return doneZoom(vp);
-    return previewZoom(vp, config);
-  }
+  /** 직전 프레임의 시점 종류 — 바뀌면 카메라 feed-forward 를 끊어 부드럽게 옮겨갑니다 */
+  let lastViewKind = null;
 
   /**
-   * display.trueScale 이 바뀌었으면 투영을 갈아끼웁니다.
-   * 비행 중이든 아니든 즉시 바꾸고, 궤적 캐시는 무효화합니다.
-   * @returns {boolean} 바뀌었는가
+   * 지금 화면이 보여줘야 할 시점 — `{ kind, zoom, center }`.
+   * center 가 null 이면 지구가 화면 한가운데입니다.
    */
-  function syncProjection(vp, display) {
-    const want = display?.trueScale !== false;
-    if (want === trueScale) return false;
-    trueScale = want;
-    vp.setProjection(projectionFor(want));
-    trailLayer.invalidate();
-    return true;
+  function currentView(vp) {
+    const state = { pos: sim.pos, vel: sim.vel };
+    if (sim.active) {
+      if (followCam) return { kind: 'ball', zoom: followZoom(sim.radius), center: sim.pos };
+      return { kind: 'orbit', ...fitOrbitView(state, vp) };
+    }
+    if (sim.done) {
+      // 탈출은 원지점이 없으므로 지구~포탄 상자로, 착탄은 최고 고도까지가 들어오게
+      return sim.unbound
+        ? { kind: 'result', ...fitOrbitView(state, vp) }
+        : { kind: 'result', ...fitRadiusView(R_EARTH + sim.stats.maxAlt, vp) };
+    }
+    return { kind: 'idle', zoom: 1, center: null }; // 발사 전: 지구를 원래 크기로
   }
 
   return {
@@ -131,13 +98,10 @@ export function createOrbitalMode() {
     enter(modeCtx, { config, carry } = {}) {
       ctx = modeCtx;
       sim.bus = modeCtx.bus;
-      trueScale = null; // 다른 모드가 투영을 바꿔 놓았으므로 다시 고릅니다
-      syncProjection(modeCtx.vp, modeCtx.display);
-      const cfg = config ?? { angleDeg: 0, initSpeed: 0 };
+      modeCtx.vp.setProjection(RadialLinearProjection); // 지표면 모드가 바꿔 놓았을 수 있습니다
+      lastViewKind = null;
       // 이월된 비행(지표면 착탄)은 그 비행이 다 보이는 줌으로
-      const z = carry?.state
-        ? Math.min(previewZoom(modeCtx.vp, cfg), fitZoomForRadius(R_EARTH + carry.stats.maxAlt, modeCtx.vp))
-        : previewZoom(modeCtx.vp, cfg);
+      const z = carry?.stats ? fitRadiusView(R_EARTH + carry.stats.maxAlt, modeCtx.vp).zoom : 1;
       modeCtx.vp.setZoom(z, { immediate: !carry });
       modeCtx.cam.centerOn(modeCtx.vp);
       trailLayer.invalidate();
@@ -158,8 +122,9 @@ export function createOrbitalMode() {
     reset() {
       sim.reset();
       trailLayer.invalidate();
+      lastViewKind = null;
       if (ctx) {
-        ctx.vp.setZoom(previewZoom(ctx.vp, ctx.config));
+        ctx.vp.setZoom(1);
         ctx.cam.centerOn(ctx.vp);
       }
     },
@@ -197,24 +162,27 @@ export function createOrbitalMode() {
     /** 궤도 모드는 착탄/탈출 후에도 이 화면에 머무릅니다 */
     onFlightEnd: () => null,
 
-    update({ vp, cam, config, display }) {
+    update({ vp, cam, display, config }) {
       followCam = display?.followCam !== false;
-      // 체크박스로 축척을 바꾸면 그 자리에서 투영을 갈아끼웁니다
-      if (syncProjection(vp, display)) vp.setZoom(policyZoom(vp, config), { immediate: true });
-
-      // ── 줌: 발사 전 미리보기 / 비행 중 추적 / 결과 화면 ──
-      vp.zoom.target = policyZoom(vp, config);
-      vp.updateZoom();
-
-      // ── 카메라: 비행 중 포탄 추적 (F 로 끄면 지구 중앙 + 궤도 전체) ──
-      // 압축 보기는 지구가 화면에서 너무 멀어지지 않게 clamp 하지만, 실제 축척은
-      // 지구가 수천 px 밖에 있는 게 정상이므로(earthLocator 가 방향을 알려줌) 풀어 둡니다.
-      const follow = sim.active && sim.trail.length > 0 && !overview() ? sim.pos : null;
-      cam.update(vp, follow, { clamp: !trueScale });
-      if (!sim.active && !sim.done) cam.centerOn(vp);
 
       // ── 물리: 배속만큼 스텝 진행 ──
+      // 카메라보다 **먼저** 진행합니다. 나중에 하면 카메라는 한 스텝 전 위치를 보고 맞추는데,
+      // 화면에는 진행 후 위치가 그려져 항상 한 프레임씩 뒤처집니다
+      // (×128 근지점에서는 한 프레임이 40 px 이 넘습니다).
       sim.advance(config.timeScale);
+
+      // ── 시점: 포탄 추적 / 궤도 전체 / 결과 화면 ──
+      const view = currentView(vp);
+      vp.zoom.target = view.zoom;
+      vp.updateZoom();
+
+      // 추적 대상이 바뀌는 프레임에는 feed-forward 를 끊습니다(순간이동 방지)
+      if (view.kind !== lastViewKind) {
+        cam.retarget();
+        lastViewKind = view.kind;
+      }
+      // 지구가 화면 밖으로 나가는 건 정상입니다(earthLocator 가 방향을 알려줌) — clamp 없음
+      cam.update(vp, view.center, { clamp: false });
     },
   };
 }

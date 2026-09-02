@@ -1,5 +1,5 @@
 import { SURFACE_SCALE } from '../core/constants.js';
-import { RadialLogProjection } from './projections/RadialLogProjection.js';
+import { RadialLinearProjection } from './projections/RadialLinearProjection.js';
 
 /**
  * 월드(미터) ↔ 화면(픽셀) 변환과 줌을 담당합니다.
@@ -39,7 +39,7 @@ export class Viewport {
 
   zoom = { current: 1, target: 1 };
 
-  constructor({ projection = RadialLogProjection, surfaceScale = SURFACE_SCALE } = {}) {
+  constructor({ projection = RadialLinearProjection, surfaceScale = SURFACE_SCALE } = {}) {
     this.projection = projection;
     this.surfaceScale = surfaceScale;
   }
@@ -56,12 +56,12 @@ export class Viewport {
 
   /**
    * 줌을 목표치로 지수 보간합니다.
-   * 축소(멀어짐)는 빠르게, 복귀(가까워짐)는 느리게 — 포탄을 놓치지 않으면서
+   * 축소(멀어짐)는 빠르게, 복귀(가까워짐)는 조금 느리게 — 포탄을 놓치지 않으면서
    * 화면이 덜컥거리지 않게 하는 비대칭 감쇠입니다.
    */
   updateZoom() {
     const z = this.zoom;
-    const k = z.current > z.target ? 0.07 : 0.02;
+    const k = z.current > z.target ? 0.07 : 0.05;
     z.current += (z.target - z.current) * k;
     if (Math.abs(z.current - z.target) < 0.0005) z.current = z.target;
     this.recomputeDerived();

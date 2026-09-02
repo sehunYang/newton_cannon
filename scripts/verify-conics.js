@@ -11,17 +11,16 @@
  *
  * 두 단계로 검사합니다.
  *  [1] 물리   — 월드 좌표의 궤적이 원뿔곡선인가 (1회 공전 또는 착탄/탈출까지)
- *  [2] 화면   — 궤도 모드의 두 투영으로 그렸을 때도 원뿔곡선인가.
- *              실제 축척은 통과해야 하고, 로그 압축은 (설계상) 실패합니다.
- *              후자는 실패가 아니라 "왜 실제 축척이 기본인가"의 근거로 출력합니다.
+ *  [2] 화면   — 궤도 모드의 투영(실제 축척)을 거친 뒤에도 원뿔곡선인가.
+ *              화면은 월드의 순수한 확대·축소이므로 통과해야 합니다. (먼 거리를 로그로
+ *              눌러 담던 투영은 이 검사에서 20% 넘게 틀어져 제거했습니다)
  */
 import { ProjectileSim } from '../src/sim/ProjectileSim.js';
 import { Trail } from '../src/sim/Trail.js';
 import { createLaunchState } from '../src/sim/launchState.js';
 import { Viewport } from '../src/render/Viewport.js';
-import { RadialLogProjection } from '../src/render/projections/RadialLogProjection.js';
 import { RadialLinearProjection } from '../src/render/projections/RadialLinearProjection.js';
-import { fitZoomForOrbit, speedToZoom } from '../src/render/zoomPolicy.js';
+import { fitOrbitView } from '../src/render/zoomPolicy.js';
 import { GM, R_EARTH, DT_ORBITAL, DT_SURFACE, ESCAPE_RADIUS } from '../src/core/constants.js';
 
 /** 초기 상태 → 원뿔곡선 파라미터 (p, e, ω) 와 보존량 */
@@ -134,32 +133,28 @@ for (const c of cases) {
     `${f.maxDE.toExponential(1)}  ${f.maxDH.toExponential(1)}  ${ok ? '✔' : '✘'}`);
 }
 
-console.log('\n[2] 화면 — 궤도 모드 투영을 거친 뒤에도 원뿔곡선인가 (1100×690)');
-console.log('  각도   속도   종류     실제 축척      로그 압축');
+console.log('\n[2] 화면 — 궤도 모드 투영(실제 축척)을 거친 뒤에도 원뿔곡선인가 (1100×690)');
+console.log('  각도   속도   종류     최대 상대 잔차');
 for (const f of flights) {
   if (f.dt !== DT_ORBITAL) continue;
   if (Math.abs(f.conic.h) < 1e-6 * f.initSpeed * R_EARTH) {
     // 수직 발사: 각운동량 0 → 궤적이 반지름 방향 직선(퇴화 원뿔곡선). 극좌표 식이 정의되지 않음
-    console.log(`  ${String(f.angleDeg).padStart(3)}° ${String(f.initSpeed).padStart(6)}  직선   (수직 발사 — 두 투영 모두 직선)`);
+    console.log(`  ${String(f.angleDeg).padStart(3)}° ${String(f.initSpeed).padStart(6)}  직선   (수직 발사 — 화면에서도 직선)`);
     continue;
   }
   const lin = new Viewport({ projection: RadialLinearProjection });
   lin.resize(1100, 690);
-  lin.setZoom(fitZoomForOrbit(f.ls, lin), { immediate: true });
-  const log = new Viewport({ projection: RadialLogProjection });
-  log.resize(1100, 690);
-  log.setZoom(speedToZoom(f.initSpeed), { immediate: true });
+  lin.setZoom(fitOrbitView(f.ls, lin).zoom, { immediate: true });
 
   const eLin = screenConicResidual(f.pts, lin, f.conic);
-  const eLog = screenConicResidual(f.pts, log, f.conic);
   const ok = eLin <= TOL_SCREEN;
   if (!ok) bad++;
   console.log(
     `  ${String(f.angleDeg).padStart(3)}° ${String(f.initSpeed).padStart(6)}  ${kindOf(f.conic.e).padEnd(3)}  ` +
-    `${eLin.toExponential(1).padStart(9)} ${ok ? '✔' : '✘'}   ${eLog.toExponential(1).padStart(9)} ${eLog <= TOL_SCREEN ? '✔' : '(왜곡)'}`);
+    `${eLin.toExponential(1).padStart(9)} ${ok ? '✔' : '✘'}`);
 }
 
 console.log(bad
   ? `\n✘ ${bad} 건이 허용오차(물리 ${TOL_PHYS}, 화면 ${TOL_SCREEN}) 초과`
-  : `\n✔ 물리 궤적은 원뿔곡선과 ${TOL_PHYS} 이내로 일치하고, 실제 축척 화면도 ${TOL_SCREEN} 이내로 일치`);
+  : `\n✔ 물리 궤적은 원뿔곡선과 ${TOL_PHYS} 이내로 일치하고, 화면 궤적도 ${TOL_SCREEN} 이내로 일치`);
 process.exit(bad ? 1 : 0);

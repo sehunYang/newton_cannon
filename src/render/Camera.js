@@ -23,6 +23,15 @@ export class Camera {
     this.idleLerp = idleLerp;
   }
 
+  /**
+   * 추적 대상이 **다른 것**으로 바뀔 때 호출합니다.
+   * feed-forward 는 대상이 연속적으로 움직인다는 전제라, 대상이 바뀐 프레임에 그대로 두면
+   * 좌표 차이가 통째로 실려 화면이 순간이동합니다. 한 프레임 끊어 주면 부드럽게 옮겨갑니다.
+   */
+  retarget() {
+    this.tracking = false;
+  }
+
   centerOn(viewport) {
     const ox = viewport.width / 2;
     const oy = viewport.height / 2;
@@ -54,9 +63,13 @@ export class Camera {
       const { x, y } = followWorldPos;
       const r = Math.hypot(x, y);
       const rPx = viewport.rToScreen(r);
+      // 지구 중심을 그대로 따라가는 경우(r = 0)는 방향이 없으므로 0 으로 둡니다.
+      // (0/0 = NaN 이 화면 좌표 전체를 오염시킵니다)
+      const nx = r > 0 ? x / r : 0;
+      const ny = r > 0 ? y / r : 0;
       // 대상이 앵커 위치에 오려면: ox + nx·rPx = anchorX·W  →  ox = anchorX·W − nx·rPx
-      let desiredOx = anchorX * W - (x / r) * rPx;
-      let desiredOy = anchorY * H + (y / r) * rPx; // y 반전
+      let desiredOx = anchorX * W - nx * rPx;
+      let desiredOy = anchorY * H + ny * rPx; // y 반전
       if (clamp) {
         desiredOx = Math.max(-W * 0.4, Math.min(W * 1.4, desiredOx));
         desiredOy = Math.max(-H * 0.4, Math.min(H * 1.4, desiredOy));
