@@ -13,6 +13,7 @@ npm run dev           # http://localhost:5173
 npm run check         # 모든 모듈 로드 (import 경로/문법 검증)
 npm test              # 헤드리스 스모크 테스트 (물리 + 배선 + 라우팅)
 npm run test:browser  # 실제 Chrome E2E (Playwright) + 스크린샷
+npm run verify:physics # 궤적 vs 해석적 원뿔곡선 (물리 + 화면 투영)
 ```
 
 ### 테스트 3단
@@ -21,6 +22,7 @@ npm run test:browser  # 실제 Chrome E2E (Playwright) + 스크린샷
 | `check` | import 경로, 문법 | 동작 |
 | `test` | 물리 결과, 이벤트 배선, 모드 라우팅 | 렌더링, CSS, 브라우저 API |
 | `test:browser` | ES 모듈 로드, 콘솔 에러, CSS, 캔버스 실제 렌더, 사용자 조작, 반응형 레이아웃 | 그림의 '미적' 정확성 (스크린샷을 눈으로) |
+| `verify:physics` | 17개 발사 조건의 궤적이 `r(θ)=p/(1+e·cos(θ−ω))` 과 일치하는가 (월드 10⁻⁴, 실제 축척 화면 2×10⁻³) | — |
 
 > `file://` 로 직접 열면 브라우저가 ES 모듈을 차단합니다. 반드시 서버로 여세요.
 
@@ -103,7 +105,22 @@ EventBus ──► App  (유일한 상태 소유자: config / display)
 | 적분 간격 | 2 초 | 1/120 초 |
 | 시간 진행 | 프레임당 고정 스텝 수 | **실제 경과 시간 기준** (누적기) |
 | 기본 배속 | 사용자 선택 유지 | 비행시간에 맞춰 자동 (`preferredTimeScale(launchState)`) |
-| 투영 | `RadialLogProjection` (이중 스케일) | `SurfaceProjection` (선형) |
+| 투영 | `RadialLinearProjection` (실제 축척, 기본) / `RadialLogProjection` (압축 보기, `L`) | `SurfaceProjection` (선형) |
+
+### 궤도 모드의 두 투영과 줌 정책
+
+`RadialLogProjection` 은 지표 근처는 선형, 먼 곳은 로그로 눌러 80 Re 탈출까지 한 화면에
+담지만, 반지름을 비선형으로 바꾸므로 **타원이 타원으로 보이지 않습니다**(원지점/근지점 화면 비율
+3.08 vs 실제 4.01, 초점이 지구에서 벗어남). 물리는 정확한데 그림이 틀리는 상황이라
+`RadialLinearProjection` (`rPx = rSurfacePx · r / R_EARTH`)을 기본으로 두고, 로그 투영은
+`display.trueScale=false` 일 때만 씁니다. `OrbitalMode.syncProjection` 이 매 프레임 `display` 와
+비교해 갈아끼우고 궤적 캐시를 비웁니다.
+
+줌은 투영에 따라 다릅니다(`render/zoomPolicy.js`).
+- 압축 보기: `speedToZoom(initSpeed)` / 비행 중 `altToZoom(r)` 과의 min.
+- 실제 축척: 발사 조건으로 궤도 요소를 구해 **원지점이 화면의 90% 안에 들어오는 줌**
+  (`fitZoomForOrbit`)을 발사 순간 확정해 두고, 속박 궤도면 그대로 유지(타원이 흔들리지 않게),
+  탈출 궤도면 `fitZoomForRadius(r·1.05)` 로 포탄을 따라 계속 물러납니다.
 
 ### 시간 처리
 

@@ -42,6 +42,7 @@ export const els = {
   btnReset: () => $('btn-reset'),
   chkTrail: () => $('chk-trail'),
   chkGrid: () => $('chk-grid'),
+  chkScale: () => $('chk-scale'),
 
   // 모바일 레이아웃 계산용
   ctrlPanel: () => document.querySelector('.ctrl-panel'),

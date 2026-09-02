@@ -53,10 +53,11 @@ try {
   await wait(600);
   await shot('01-orbital-aim');
 
-  // ② 타원 궤도 — 1회 공전 완료 후 (격자 켜서 거리 눈금까지)
+  // ② 타원 궤도 — 1회 공전 완료 후 (격자 켜서 거리 눈금까지).
+  //    실제 축척(기본)이라 원지점 4 Re 의 타원이 지구를 초점에 두고 그대로 보입니다
   await reset();
   await setSlider('#s-ang', 0);
-  await setSlider('#s-spd', 8200);
+  await setSlider('#s-spd', 10000);
   await wait(700);
   await page.keyboard.press('g');
   await page.click('#btn-fire');
@@ -66,8 +67,9 @@ try {
   await shot('02-orbit-ellipse');
   await page.keyboard.press('g');
 
-  // ③ 탈출 궤도
+  // ③ 탈출 궤도 — 80 Re 까지 가므로 압축 보기(L)로 찍고 되돌립니다
   await reset();
+  await page.keyboard.press('l');
   await setSlider('#s-ang', 45);
   await setSlider('#s-spd', 11600);
   await wait(600);
@@ -76,6 +78,7 @@ try {
   await done(90000);
   await wait(600);
   await shot('03-escape');
+  await page.keyboard.press('l');
 
   console.log('지표면 시점');
   // ④ 지표면 비행 중 — 궤적이 충분히 그려진 뒤 배속을 ×1 로 되돌려 촬영

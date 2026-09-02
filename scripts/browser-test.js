@@ -126,7 +126,7 @@ try {
   check('캔버스에 그림이 그려짐', ink0 > 0.05, `잉크 비율 ${(ink0 * 100).toFixed(1)}%`);
 
   check('HUD 초기값', (await text('#hud-spd')) === '— m/s');
-  check('궤도 배지 = 포물선 낙하', (await text('#hud-orbit')) === '포물선 낙하');
+  check('궤도 배지 = 타원 호 낙하', (await text('#hud-orbit')) === '타원 호 낙하', await text('#hud-orbit'));
   check('줌 배지 표시', /^\d\.\d\d×$/.test(await text('#zoom-val')), await text('#zoom-val'));
   const m1 = await page.locator('#marker-v1').evaluate((e) => e.style.left);
   check('V1 마커가 슬라이더 위 65.9% 지점', m1.startsWith('65.8'), m1);
@@ -167,11 +167,23 @@ try {
   await setSlider('#s-spd', 8000);
   await page.waitForTimeout(1200);
   check('속도 라벨 (0.05 km/s 눈금)', (await text('#v-spd')) === '8.00 km/s', await text('#v-spd'));
-  check('배지가 궤도로 전환', (await text('#hud-orbit')) === '타원/원 궤도');
+  // 배지는 속력이 아니라 궤도 요소로 판정합니다: 45° 로 8 km/s 는 근지점이 지표 아래(착탄),
+  // 같은 속력이라도 0° 면 근지점이 발사점이라 궤도가 됩니다.
+  check('45°·8 km/s 는 낙하 (근지점 < 지표)', (await text('#hud-orbit')) === '타원 호 낙하', await text('#hud-orbit'));
+  await setSlider('#s-ang', 0);
+  await page.waitForTimeout(200);
+  check('0°·8 km/s 는 궤도', (await text('#hud-orbit')) === '타원/원 궤도', await text('#hud-orbit'));
+  await setSlider('#s-ang', 45);
+  await page.waitForTimeout(200);
   const bg8k = await page.locator('#s-spd').evaluate((e) => e.style.background);
   check('슬라이더 트랙 = 궤도색(파랑)', bg8k.includes('rgb(58, 142, 255)'));
-  const zoom8k = (await state()).zoom;
-  check('속도 미리보기로 줌 아웃', zoom8k < 1.0, `zoom ${zoom8k.toFixed(2)}`);
+  // 실제 축척에서는 8 km/s 궤도(원지점 1.05 Re)가 줌 1 에 다 들어옵니다.
+  // 10 km/s(원지점 4 Re)로 올리면 타원 전체가 보이도록 물러나야 합니다.
+  check('실제 축척이 기본', (await state()).display.trueScale === true);
+  await setSlider('#s-spd', 10000);
+  await page.waitForTimeout(1500);
+  const zoom10k = (await state()).zoom;
+  check('원지점(4 Re)에 맞춰 줌 아웃', zoom10k < 0.6 && zoom10k > 0.3, `zoom ${zoom10k.toFixed(2)}`);
 
   await setSlider('#s-spd', 11500);
   await page.waitForTimeout(250);
@@ -384,6 +396,79 @@ try {
   const s4b = await state();
   check('1회 공전 후 궤적 잠금', s4b.trailLocked, `${s4b.trailPoints}점`);
   await shot('06-원궤도');
+
+  // ═══ [5b] 실제 축척 — 타원이 정말 타원인가 ═══
+  console.log('\n[5b] 실제 축척 타원 검증 (10000 m/s, 0°)');
+  await page.keyboard.press('r');
+  await page.waitForTimeout(400);
+  await setSlider('#s-spd', 10000);
+  await page.waitForTimeout(600);
+  await page.keyboard.press('4');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__cannon.router.current.sim.trail.locked,
+    null, { timeout: 40000 });
+  await page.waitForTimeout(400);
+
+  /**
+   * 화면에 찍힌 궤적 점이 "지구 중심을 초점으로 하는 원뿔곡선" 위에 있는지 잽니다.
+   * 월드 궤도 요소(e, ω)는 발사 상태로부터 해석적으로 구하고, 화면 반지름이
+   * rPx = p'/(1+e·cos(θ−ω)) 를 만족하는지 p' 만 맞춰 잔차를 봅니다.
+   */
+  const shapeCheck = () => page.evaluate(() => {
+    const a = window.__cannon;
+    const vp = a.vp, pts = a.router.current.sim.trail.points;
+    const GM = 6.674e-11 * 5.972e24;
+    const spd = a.config.initSpeed, ang = a.config.angleDeg * Math.PI / 180;
+    const pos = { x: 0, y: 6.371e6 + 8848 }, vel = { x: spd * Math.cos(ang), y: spd * Math.sin(ang) };
+    const r0 = Math.hypot(pos.x, pos.y);
+    const h = pos.x * vel.y - pos.y * vel.x;
+    const ex = (vel.y * h) / GM - pos.x / r0, ey = (-vel.x * h) / GM - pos.y / r0;
+    const e = Math.hypot(ex, ey), omega = Math.atan2(ey, ex);
+    let num = 0, den = 0, inView = 0;
+    const smp = pts.map((w) => {
+      const s = vp.worldToScreen(w.x, w.y);
+      if (s.x >= 0 && s.x <= vp.width && s.y >= 0 && s.y <= vp.height) inView++;
+      const dx = s.x - vp.ox, dy = -(s.y - vp.oy);
+      const rPx = Math.hypot(dx, dy);
+      const f = 1 / (1 + e * Math.cos(Math.atan2(dy, dx) - omega));
+      num += rPx * f; den += f * f;
+      return { rPx, f };
+    });
+    const pFit = num / den;
+    let maxRel = 0;
+    for (const { rPx, f } of smp) maxRel = Math.max(maxRel, Math.abs(rPx - pFit * f) / (pFit * f));
+    const rs = pts.map((w) => Math.hypot(w.x, w.y));
+    const px = smp.map((q) => q.rPx);
+    return {
+      e, maxRel, n: pts.length, inViewFrac: inView / pts.length,
+      worldRatio: Math.max(...rs) / Math.min(...rs),
+      screenRatio: Math.max(...px) / Math.min(...px),
+      projection: vp.projection.id, zoom: vp.zoom.current,
+    };
+  });
+
+  const sh = await shapeCheck();
+  check('선형 투영 적용', sh.projection === 'radial-linear', sh.projection);
+  check('이심률 0.60 타원', Math.abs(sh.e - 0.601) < 0.005, sh.e.toFixed(3));
+  check('화면 궤적이 지구를 초점으로 한 타원 (잔차 0.2% 미만)', sh.maxRel < 2e-3,
+    `max 잔차 ${(sh.maxRel * 100).toFixed(3)}%`);
+  check('원지점/근지점 거리비가 화면에서도 같음', Math.abs(sh.screenRatio - sh.worldRatio) < 0.02,
+    `화면 ${sh.screenRatio.toFixed(3)} vs 실제 ${sh.worldRatio.toFixed(3)}`);
+  check('타원 전체가 화면 안에', sh.inViewFrac === 1, `${(sh.inViewFrac * 100).toFixed(0)}%`);
+  await shot('06b-실제축척-타원');
+
+  // 압축 보기로 바꾸면 (설계상) 같은 궤적이 타원이 아니게 됩니다
+  await page.keyboard.press('l');
+  await page.waitForTimeout(400);
+  const shLog = await shapeCheck();
+  check('L → 압축 보기(로그 투영)', shLog.projection === 'radial-log', shLog.projection);
+  check('체크박스 동기화 (해제)', !(await page.locator('#chk-scale').isChecked()));
+  check('로그 투영에서는 초점이 어긋남 (검증 지표가 왜곡을 잡아냄)', shLog.maxRel > 0.05,
+    `max 잔차 ${(shLog.maxRel * 100).toFixed(1)}%, 거리비 ${shLog.screenRatio.toFixed(2)}`);
+  await shot('06c-압축보기-타원');
+  await page.keyboard.press('l');
+  await page.waitForTimeout(400);
+  check('L → 실제 축척 복귀', (await shapeCheck()).projection === 'radial-linear');
 
   // ═══ [6] 키보드 단축키 ═══
   console.log('\n[6] 키보드 단축키');

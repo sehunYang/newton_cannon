@@ -1,5 +1,6 @@
 import { fmtAlt, fmtDist, fmtSpeed, fmtTime } from '../core/format.js';
 import { classifyPreview, classifyLive } from '../physics/orbit.js';
+import { createLaunchState } from '../sim/launchState.js';
 import { els } from './dom.js';
 
 /**
@@ -17,7 +18,7 @@ export class Hud {
     els.hudAlt().textContent = '—';
     els.hudTime().textContent = '0.0 s';
 
-    const preview = classifyPreview(config.initSpeed);
+    const preview = classifyPreview(createLaunchState(config));
     const badge = els.hudOrbit();
     badge.textContent = preview.txt;
     badge.className = 'orbit-badge ' + preview.cls;
@@ -52,7 +53,7 @@ export class Hud {
     if (sim.done && sim.outcome === 'escape') {
       return { txt: '🚀 탈출', cls: 'escape2', border: 'escape' };
     }
-    return classifyLive(sim.radius, sim.speed);
+    return classifyLive(sim.pos, sim.vel);
   }
 
   #showStats(sim, modeId) {

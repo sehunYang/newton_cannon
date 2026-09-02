@@ -38,6 +38,9 @@ export function bindControls(bus, initial) {
   els.chkGrid().addEventListener('change', (e) => {
     bus.emit(EV.DISPLAY_CHANGED, { showGrid: e.target.checked });
   });
+  els.chkScale().addEventListener('change', (e) => {
+    bus.emit(EV.DISPLAY_CHANGED, { trueScale: e.target.checked });
+  });
 
   els.btnFire().addEventListener('click', () => bus.emit(EV.LAUNCH_REQUESTED));
   els.btnReset().addEventListener('click', () => bus.emit(EV.RESET_REQUESTED));
@@ -110,7 +113,8 @@ export function setFireButtonLaunched(launched) {
 }
 
 /** 체크박스 상태를 화면 옵션과 맞춥니다(단축키로 바꿨을 때) */
-export function syncDisplayToggles({ showTrail, showGrid }) {
+export function syncDisplayToggles({ showTrail, showGrid, trueScale }) {
   els.chkTrail().checked = showTrail;
   els.chkGrid().checked = showGrid;
+  els.chkScale().checked = trueScale !== false;
 }

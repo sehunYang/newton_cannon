@@ -1,13 +1,21 @@
 import { R_EARTH, H_MOUNT, V1, V2 } from '../core/constants.js';
+import { orbitalElements } from '../physics/orbit.js';
 
 /**
  * 궤도 모드의 줌 정책 — "지금 무엇을 보여줘야 하는가"를 결정합니다.
  *
- * 두 가지 신호를 씁니다.
+ * 두 투영이 서로 다른 정책을 씁니다.
+ *
+ * ▸ 로그 투영(압축 보기)
  *  - speedToZoom : 발사 전 미리보기. 슬라이더를 올리면 화면이 미리 물러나며
  *                  "이 속도면 이만큼 멀리 간다"를 예고합니다.
  *  - altToZoom   : 비행 중 실제 고도. 포탄이 화면 밖으로 나가지 않게 합니다.
- * 매 프레임 둘 중 **더 넓은 시야**(작은 값)를 택합니다.
+ *  매 프레임 둘 중 **더 넓은 시야**(작은 값)를 택합니다.
+ *
+ * ▸ 선형 투영(실제 축척)
+ *  - fitZoomForOrbit : 초기 상태로 궤도 요소를 구해 **원지점까지 통째로** 들어오는
+ *                      줌을 고릅니다. 타원 전체가 한 화면에 있어야 "타원"으로 보입니다.
+ *  - fitZoomForRadius: 탈출 궤도처럼 원지점이 없는 경우, 현재 거리에 맞춰 물러납니다.
  */
 
 export function speedToZoom(v) {
@@ -26,4 +34,32 @@ export function altToZoom(r) {
   if (alt <= R_EARTH * 10) return 0.36;
   if (alt <= R_EARTH * 30) return 0.3;
   return 0.26; // 30 Re 이상 (제2 우주속도 근처 고타원 궤도)
+}
+
+// ── 실제 축척 ──────────────────────────────────────────────────
+/** 화면 짧은 변의 절반 중 이만큼까지만 궤도가 차지하게 합니다 (여백) */
+const FIT_FRACTION = 0.8; // 아래쪽 체크박스 바·HUD 를 피해 원지점이 놓이도록
+/** 원지점이 지표 근처인 낮은 발사에서도 지구가 화면을 넘지 않게 */
+const MAX_ZOOM = 1.0;
+
+/**
+ * 반지름 r(m)이 화면 안에 들어오는 줌.
+ * 선형 투영에서 rToScreen(r) = baseR·zoom·r/Re 이므로 역산합니다.
+ */
+export function fitZoomForRadius(r, vp) {
+  const halfMin = Math.min(vp.width, vp.height) / 2;
+  const z = (FIT_FRACTION * halfMin * R_EARTH) / (vp.baseR * r);
+  return Math.min(MAX_ZOOM, z);
+}
+
+/**
+ * 발사 초기 상태로부터 "궤도 전체가 보이는" 줌.
+ *  - 속박 궤도: 원지점 기준
+ *  - 탈출 궤도: 원지점이 없으므로 일단 근지점 부근(2 Re)에서 시작하고,
+ *              비행 중에는 fitZoomForRadius 로 따라갑니다.
+ */
+export function fitZoomForOrbit({ pos, vel }, vp) {
+  const { bound, apoapsis } = orbitalElements(pos, vel);
+  const rFit = bound && Number.isFinite(apoapsis) ? apoapsis : R_EARTH * 2;
+  return fitZoomForRadius(Math.max(rFit, R_EARTH), vp);
 }

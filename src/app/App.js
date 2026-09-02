@@ -5,7 +5,6 @@ import { Loop } from '../core/Loop.js';
 import { Renderer } from '../render/Renderer.js';
 import { Viewport } from '../render/Viewport.js';
 import { Camera } from '../render/Camera.js';
-import { speedToZoom } from '../render/zoomPolicy.js';
 
 import { ParticleSystem } from '../fx/ParticleSystem.js';
 import { LaunchFx } from '../fx/LaunchFx.js';
@@ -43,7 +42,7 @@ export class App {
   /** 발사 설정 — UI 와 모드가 공유하는 유일한 진실 */
   config = { angleDeg: 0, initSpeed: 4000, timeScale: 8 };
   /** 표시 옵션 */
-  display = { showTrail: true, showGrid: false };
+  display = { showTrail: true, showGrid: false, trueScale: true };
 
   /**
    * 사용자가 마지막으로 고른 배속.
@@ -67,7 +66,11 @@ export class App {
     };
 
     /** 모드에게 넘겨줄 공유 자원 묶음 */
-    this.modeCtx = { bus: this.bus, vp: this.vp, cam: this.cam, fx: this.fx };
+    // config / display 는 같은 객체를 넘깁니다 — App 이 제자리에서 갱신하므로 항상 최신입니다
+    this.modeCtx = {
+      bus: this.bus, vp: this.vp, cam: this.cam, fx: this.fx,
+      config: this.config, display: this.display,
+    };
 
     this.router = new ModeRouter({
       modes: createModes(),
@@ -117,11 +120,8 @@ export class App {
     bus.on(EV.CONFIG_CHANGED, (patch) => {
       Object.assign(this.config, patch);
       const sim = this.router.current?.sim;
-      // 발사 전에만 미리보기(줌·HUD)를 갱신합니다
-      if (sim && !sim.active && !sim.done) {
-        this.vp.zoom.target = speedToZoom(this.config.initSpeed);
-        this.hud.showIdle(this.config);
-      }
+      // 발사 전에만 HUD 미리보기를 갱신합니다 (줌 미리보기는 모드가 매 프레임 계산)
+      if (sim && !sim.active && !sim.done) this.hud.showIdle(this.config);
     });
 
     bus.on(EV.DISPLAY_CHANGED, (patch) => {
@@ -203,9 +203,6 @@ export class App {
     this.fx.particles.clear();
     this.fx.launch.reset();
     this.fx.explosion.reset();
-
-    this.vp.setZoom(speedToZoom(this.config.initSpeed));
-    this.cam.centerOn(this.vp);
 
     setFireButtonLaunched(false);
     updateSpeedSliderBg(this.config.initSpeed);

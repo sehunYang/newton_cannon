@@ -1,4 +1,4 @@
-import { GM, R_EARTH, V1, V2 } from '../core/constants.js';
+import { GM, R_EARTH, V1 } from '../core/constants.js';
 
 /**
  * 케플러 궤도 요소 — 상태 벡터(위치·속도)로부터 궤도의 '모양'을 뽑아냅니다.
@@ -60,25 +60,33 @@ export function isSuborbital(pos, vel, surfaceRadius = R_EARTH) {
 /** 단순 기준: 제1 우주속도 미만인가. (설명용/폴백용) */
 export const isBelowFirstCosmicSpeed = (speed) => speed < V1;
 
-/** 발사 전 미리보기 배지 — 슬라이더 속도만 보고 대략의 결과를 알려줍니다. */
-export function classifyPreview(speed) {
-  if (speed <= 200) return { txt: '미발사', cls: 'idle' };
-  if (speed < V1 * 0.94) return { txt: '포물선 낙하', cls: 'fall' };
-  if (speed < V2 * 0.98) return { txt: '타원/원 궤도', cls: 'orbit2' };
-  return { txt: '탈출 궤도', cls: 'escape2' };
+/**
+ * 상태 벡터로 궤도의 종류를 분류합니다 — HUD 배지의 단일 출처.
+ *
+ * 속력만 보고 어림하지 않고 궤도 요소로 판정합니다. 그래서
+ *  - 발사각이 있으면 같은 속력이라도 근지점이 지표 아래로 내려가 '낙하'가 되고,
+ *  - 타원 궤도의 원지점에서 속력이 느려져도 여전히 '궤도'입니다.
+ *    (국소 원궤도 속도와 비교하던 예전 방식은 원지점 근처에서 '낙하'로 오판했습니다)
+ *
+ * 이름에 대해: 제1 우주속도 미만의 '낙하'도 물리적으로는 포물선이 아니라
+ * 지구 중심을 초점으로 하는 **타원의 일부(호)** 입니다. 포물선은 지표면 근처에서
+ * 중력이 평행하다고 볼 때의 근사입니다. 지표면 모드가 보여주는 것이 바로 그 차이입니다.
+ */
+export function classifyState(pos, vel, surfaceRadius = R_EARTH) {
+  const { bound, periapsis } = orbitalElements(pos, vel);
+  if (!bound) return { txt: '탈출 궤도', cls: 'escape2', border: 'escape' };
+  if (periapsis > surfaceRadius) return { txt: '타원/원 궤도', cls: 'orbit2', border: 'orbit' };
+  return { txt: '타원 호 낙하', cls: 'fall', border: null };
 }
 
-/**
- * 비행 중 실시간 분류 — 현재 '고도에서의' 국소 제1/제2 우주속도와 비교합니다.
- * (고도가 올라가면 필요한 원궤도 속도가 줄어든다는 걸 보여주는 지점)
- */
-export function classifyLive(r, speed) {
-  const v1Local = Math.sqrt(GM / r);
-  const v2Local = v1Local * Math.SQRT2;
-  if (speed >= v2Local * 0.98) return { txt: '탈출 궤도', cls: 'escape2', border: 'escape' };
-  if (speed >= v1Local * 0.92) return { txt: '타원/원 궤도', cls: 'orbit2', border: 'orbit' };
-  return { txt: '포물선 낙하', cls: 'fall', border: null };
+/** 발사 전 미리보기 배지 — 슬라이더의 각도·속도로 만든 초기 상태를 분류합니다. */
+export function classifyPreview({ pos, vel }) {
+  if (Math.hypot(vel.x, vel.y) <= 200) return { txt: '미발사', cls: 'idle' };
+  return classifyState(pos, vel);
 }
+
+/** 비행 중 실시간 분류 — 현재 상태 벡터로 판정합니다 (항력이 있어도 그 순간의 궤도) */
+export const classifyLive = classifyState;
 
 /** 주어진 반지름에서의 원궤도 속도 */
 export const circularSpeedAt = (r) => Math.sqrt(GM / r);
