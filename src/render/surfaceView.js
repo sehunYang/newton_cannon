@@ -38,6 +38,19 @@ export function groundYAt(vp, x) {
 }
 
 /**
+ * 화면 x 픽셀 아래 지표면 지점의 '발사 지점에서 잰 거리'(m).
+ * `groundYAt` 의 역방향 짝 — 지형 무늬가 지표면에 붙어 있으려면 필요합니다.
+ *
+ * 발사 지점은 월드 (0, R_EARTH) 이고 화면에서는 언제나 x = vp.ox 입니다
+ * (worldToScreen 이 방향 벡터를 그대로 쓰므로). 지표면 원 위에서 화면 x 가
+ * dx 만큼 떨어진 점의 중심각은 asin(dx / R_px) 이고, 거리는 그 각 × R_EARTH 입니다.
+ */
+export function groundDistanceAt(vp, x) {
+  const t = (x - vp.ox) / vp.rSurfacePx;
+  return Math.asin(Math.max(-1, Math.min(1, t))) * R_EARTH;
+}
+
+/**
  * 화면을 가로지르는 지표면 폴리라인. 지형·격자·비교선이 모두 이걸 씁니다.
  * @returns {{x:number,y:number}[]}
  */

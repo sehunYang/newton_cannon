@@ -10,7 +10,7 @@ import { createSurfaceProjection } from '../../render/projections/SurfaceProject
 
 import { backgroundLayer } from '../../render/layers/background.js';
 import { createStarsLayer } from '../../render/layers/stars.js';
-import { terrainLayer } from '../../render/layers/terrain.js';
+import { createTerrainLayer } from '../../render/layers/terrain.js';
 import { surfaceGridLayer } from '../../render/layers/surfaceGrid.js';
 import { launchSiteLayer } from '../../render/layers/launchSite.js';
 import { createTrailLayer } from '../../render/layers/trail.js';
@@ -104,7 +104,7 @@ export function createSurfaceMode() {
   const layers = [
     backgroundLayer,
     createStarsLayer({ count: 220 }),
-    terrainLayer, // 지표면 + 대기 (별을 가림)
+    createTerrainLayer(), // 지표면 + 대기 (별을 가림)
     surfaceGridLayer, // 거리 눈금 · 고도선 · 평면 지구 비교선
     launchSiteLayer, // 에베레스트 + 대포
     trailLayer,
