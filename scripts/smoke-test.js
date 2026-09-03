@@ -290,6 +290,46 @@ run(30);
 check('11 km/s 에서는 탈출선 표시', app.energy.axis.showEscape);
 check('탈출선을 넣어도 축은 탈출 에너지 + 여백뿐',
   app.energy.axis.hi < U_LAUNCH_REF * 1.12, `${(app.energy.axis.hi / 1e6).toFixed(1)} MJ/kg`);
+check('축을 넉넉히 쓰는 발사는 끊지 않음', !app.energy.axis.split);
+
+// ── 수평 발사: 발사 지점이 곧 원지점이라 오르내리는 높이가 에베레스트뿐 ──
+// 단일 축으로는 변화가 축의 0.3% 라 세 곡선이 전부 수평선으로 보입니다.
+app.reset();
+app.config.initSpeed = 7000; app.config.angleDeg = 0; app.config.timeScale = 128;
+app.launch();
+run(200);
+const flat = app.energy;
+// 축은 비행 전체를 담도록 발사 순간에 확정되므로, 밴드는 표본이 아니라
+// 궤도가 예고한 변화폭(= 에베레스트 높이만큼의 퍼텐셜)에 맞춰져 있어야 합니다
+const flatSpan = energySpan({ x: 0, y: 6.371e6 + 8848 }, { x: 7000, y: 0 });
+const swing = flatSpan.u.hi - flatSpan.u.lo;
+check('수평 발사도 K·U 는 실제로 변한다 (에베레스트 높이만큼)',
+  swing > 0.05e6 && swing < 0.12e6, `${(swing / 1e6).toFixed(3)} MJ/kg`);
+check('K 의 변화폭 = U′ 의 변화폭', Math.abs((flatSpan.k.hi - flatSpan.k.lo) - swing) < 1);
+check('변화가 안 보이면 축을 끊는다', flat.axis.split);
+check('끊은 축의 두 밴드 높이가 같다 (K = E′ − U′)',
+  Math.abs((flat.axis.bands.k.hi - flat.axis.bands.k.lo)
+    - (flat.axis.bands.u.hi - flat.axis.bands.u.lo)) < 1,
+  `${((flat.axis.bands.k.hi - flat.axis.bands.k.lo) / 1e6).toFixed(3)} MJ/kg`);
+check('밴드가 변화폭을 꽉 물고 있다 (70% 이상)',
+  swing / (flat.axis.bands.u.hi - flat.axis.bands.u.lo) > 0.7,
+  `${((swing / (flat.axis.bands.u.hi - flat.axis.bands.u.lo)) * 100).toFixed(0)}%`);
+const plainFrac = swing / (flat.axis.hi - flat.axis.lo);
+check('끊기 전이라면 축의 1% 도 못 썼을 변화', plainFrac < 0.01,
+  `${(plainFrac * 100).toFixed(2)}%`);
+check('빈 구간은 두 밴드 사이 — 곡선이 지나지 않음',
+  flat.axis.bands.k.lo > flat.axis.bands.u.hi);
+
+// 원궤도(제1 우주속도 정확히)는 K·U 가 **정말로** 일정합니다.
+// 그때까지 확대하면 적분 오차를 물리인 양 크게 그리게 됩니다.
+app.reset();
+app.config.initSpeed = V18; app.config.angleDeg = 0;
+app.launch();
+run(200);
+check('원궤도는 확대하지 않음 (적분 오차 확대 방지)', !app.energy.axis.split);
+const circ2 = app.energy.points.map((q) => q.k);
+check('원궤도에서 K 는 사실상 일정', (Math.max(...circ2) - Math.min(...circ2)) < 1e4,
+  `${((Math.max(...circ2) - Math.min(...circ2)) / 1e6).toFixed(5)} MJ/kg`);
 
 app.reset();
 check('리셋하면 그래프도 비워짐', app.energy.points.length === 0);

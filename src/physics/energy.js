@@ -59,8 +59,18 @@ export const U_LAUNCH_REF = GM / R_LAUNCH;
  *
  * @param {{x:number,y:number}} pos 발사 지점
  * @param {{x:number,y:number}} vel 발사 속도
+ * 두 곡선이 훑는 구간(u, k)을 따로 돌려주는 이유는 **그 둘이 멀리 떨어져 있을 수 있기**
+ * 때문입니다. 수평 발사처럼 발사 지점이 곧 원지점인 경우 포탄이 오르내리는 높이는
+ * 에베레스트 높이뿐이라, U′ 는 축 맨 아래에 · K 는 축 맨 위에 얇게 눌어붙고 그 사이는
+ * 아무 곡선도 지나지 않는 빈 구간이 됩니다. 그래프는 그 빈 구간을 끊어서 그립니다.
+ *
+ * 두 구간의 높이는 **항상 정확히 같습니다** — K = E′ − U′ 이므로 U′ 가 오른 만큼
+ * K 가 내립니다. 그래서 같은 배율로 확대하면 두 곡선이 정확한 거울상이 됩니다.
+ *
  * @param {{surfaceRadius?:number, escapeRadius?:number}} bounds 시뮬레이션이 비행을 끝내는 거리
- * @returns {{e:number, lo:number, hi:number}} e 는 보존되는 역학적 에너지(발사 지점 기준)
+ * @returns {{e:number, u:{lo:number,hi:number}, k:{lo:number,hi:number}, lo:number, hi:number}}
+ *   e 는 보존되는 역학적 에너지(발사 지점 기준), u·k 는 각 곡선이 훑는 구간,
+ *   lo·hi 는 셋을 다 담는 바깥 범위입니다.
  */
 export function energySpan(pos, vel, {
   surfaceRadius = R_EARTH,
@@ -78,9 +88,15 @@ export function energySpan(pos, vel, {
 
   const uLo = uAt(rMin);
   const uHi = uAt(rMax);
+  // e − uHi = 가장 느린 곳(원지점)의 K, e − uLo = 가장 빠른 곳(근지점)의 K.
+  // U′(발사) = 0 이고 K(발사) = E′ 이므로 E′ 는 언제나 k 구간 안에 들어갑니다.
+  const u = { lo: uLo, hi: uHi };
+  const k = { lo: e - uHi, hi: e - uLo };
   return {
     e,
-    lo: Math.min(uLo, e - uHi, e),  // e − uHi = 가장 느린 곳(원지점)의 K
-    hi: Math.max(uHi, e - uLo, e),  // e − uLo = 가장 빠른 곳(근지점)의 K
+    u,
+    k,
+    lo: Math.min(u.lo, k.lo, e),
+    hi: Math.max(u.hi, k.hi, e),
   };
 }

@@ -27,6 +27,12 @@ import { els } from './dom.js';
  * 축을 크게 늘리지 않고 들어올 만한 발사에서는 점선으로 함께 그립니다. 예전처럼 무조건
  * 끼워 넣으면 9 km/s 발사에서 축의 40% 가 아무 곡선도 지나지 않는 빈 공간이 됐습니다.
  *
+ * **그래도 안 보이는 발사가 있습니다 — 그때는 y 축을 끊습니다.** 수평 발사는 발사 지점이
+ * 곧 원지점이라 포탄이 오르내리는 높이가 에베레스트 높이뿐입니다. 7 km/s 로 쏘면 교환되는
+ * 에너지가 0.087 MJ/kg 인데 축은 24.5 MJ/kg — 변화가 축의 0.33%(0.3 px)라 세 곡선이 전부
+ * 수평선으로 보입니다. 그런데 그 축의 99% 는 **U′ 띠와 K 띠 사이의 빈 구간**이라,
+ * 거기를 끊어내면 같은 물리가 100 배로 확대됩니다 (`#axisView` 참고).
+ *
  * 캔버스는 시뮬레이션 캔버스와 별개인 작은 DOM 캔버스입니다. `.ui` 의 자식이라
  * earthLocator 의 창이 알아서 이 패널을 피해 갑니다.
  */
@@ -41,14 +47,40 @@ const COLOR = { k: '#ffa040', u: '#3a8eff', e: '#7ef0c8' };
  * 곡선을 눌러 가며 그리지 않습니다. (≈ 9.8 km/s 부터 등장)
  */
 const ESCAPE_LINE_HEADROOM = 1.3;
+/**
+ * 각 곡선의 변화가 축 전체의 이 비율에 못 미치면 **y 축을 끊습니다**.
+ *
+ * 왜 필요한가: 수평 발사는 발사 지점이 곧 원지점이라, 포탄이 오르내리는 높이가
+ * 에베레스트 높이(8,848 m)뿐입니다. 7 km/s 로 쏘면 교환되는 에너지는 0.087 MJ/kg 인데
+ * 축은 24.5 MJ/kg — 변화가 축의 **0.33%(0.3 px)** 라 세 곡선이 전부 수평선으로 보입니다.
+ * 그런데 그 축의 99% 는 U′ 띠와 K 띠 사이의 **아무 곡선도 지나지 않는 빈 구간**입니다.
+ * 그 구간을 끊어내면 같은 물리를 100 배 확대해서 보여줄 수 있습니다.
+ */
+const SPLIT_SWING_MIN = 0.2;
+/** 끊은 축에서 빈 구간에 남겨 두는 높이 비율 (물결선 두 줄과 안내 글이 들어갈 자리) */
+const SPLIT_GAP_FRAC = 0.16;
+/**
+ * 변화가 역학적 에너지의 이 비율보다 작으면 축을 끊지 않습니다.
+ * 원궤도는 K·U 가 **정말로** 일정해서 확대할 것이 없습니다 — 그때 확대하면 적분 오차
+ * (상대 1e-6)를 물리인 양 크게 그려 버립니다. 수평 발사의 0.33% 는 이 문턱 위입니다.
+ */
+const SPLIT_NOISE_FLOOR = 5e-4;
 /** 좌우 여백은 고정, 위아래는 캔버스가 낮을수록 줄입니다(작은 폰에서 곡선이 눌리지 않게) */
 const PAD_X = 8;
 const padY = (h) => Math.max(9, Math.min(14, h * 0.14));
 
 const toMJ = (v) => v / 1e6;
 const fmtMJ = (v) => `${toMJ(v).toFixed(1)}`;
-/** 축 눈금: 값이 작을수록 소수점을 살립니다 (2 MJ/kg 짜리 발사에서 '0, 2' 만 보이면 곤란) */
-const fmtAxis = (v) => (v === 0 ? '0' : Math.abs(v) >= 10 ? toMJ(v).toFixed(0) : toMJ(v).toFixed(1));
+/**
+ * 축 눈금 표기법을 **그 축이 담는 범위**에 맞춰 고릅니다.
+ * 값의 크기로 정하면 안 됩니다 — 축을 끊어 24.50~24.59 를 보여줄 때 정수로 반올림하면
+ * '24, 25' 가 되어 확대한 의미가 사라집니다.
+ */
+function fmtAxisFor(range) {
+  const r = toMJ(Math.max(range, 1e-9));
+  const dec = r >= 10 ? 0 : r >= 1 ? 1 : r >= 0.1 ? 2 : 3;
+  return (v) => (v === 0 ? '0' : toMJ(v).toFixed(dec));
+}
 
 export class EnergyGraph {
   /** @type {{t:number,k:number,u:number,e:number}[]} 단위 J/kg */
@@ -128,36 +160,18 @@ export class EnergyGraph {
       return;
     }
 
-    // ── 값의 범위: 발사 순간의 궤도가 정해 준 최저점~최고점 (발사 지점을 0 으로 본 값) ──
-    // 보통 정확히 [0, E'] 입니다 — 발사 지점에서 U' = 0 · K = E' 이고 원지점에서 둘이
-    // 자리를 바꾸므로. 즉 축 하나가 통째로 그 발사의 에너지입니다.
-    let lo = this.#span ? this.#span.lo : 0;
-    let hi = this.#span ? this.#span.hi : 0;
-    // 안전망: 항력이 있거나 적분 오차가 있어도 곡선이 축 밖으로 나가지 않게 합니다
-    for (const p of pts) {
-      const u = p.u + U_LAUNCH_REF;
-      const e = p.e + U_LAUNCH_REF;
-      lo = Math.min(lo, u, p.k, e);
-      hi = Math.max(hi, u, p.k, e);
-    }
-    // 탈출선은 축을 크게 늘리지 않고 들어올 때만 — "얼마나 모자란가"를 보여 주되,
-    // 아직 한참 먼 발사에서 곡선을 절반으로 눌러 버리지는 않습니다
-    const showEscape = U_LAUNCH_REF <= hi * ESCAPE_LINE_HEADROOM;
-    if (showEscape) hi = Math.max(hi, U_LAUNCH_REF);
-    const margin = (hi - lo) * 0.06 || 1;
-    // 발사 지점보다 살짝 아래(착탄은 에베레스트 높이만큼 낮습니다)로 내려가는 정도는
-    // 0 에 맞춰 둡니다 — 눈금에 '-0.0' 이 뜨는 게 더 헷갈립니다
-    lo = lo < -margin ? lo - margin : 0;
-    hi += margin;
-    this.axis = { lo, hi, showEscape };
-
     const t0 = pts[0].t;
     const t1 = Math.max(pts[pts.length - 1].t, t0 + 1e-6);
     const pad = padY(h);
     const plotW = w - PAD_X * 2;
     const plotH = h - pad * 2;
     const X = (t) => PAD_X + ((t - t0) / (t1 - t0)) * plotW;
-    const Y = (v) => pad + ((hi - v) / (hi - lo)) * plotH;
+
+    const view = this.#axisView(pts, pad, plotH);
+    const { Y, showEscape } = view;
+    this.axis = {
+      lo: view.lo, hi: view.hi, showEscape, split: view.split, bands: view.bands ?? null,
+    };
 
     // ── 기준선 ──
     ctx.font = '9px "Space Mono",monospace';
@@ -211,17 +225,114 @@ export class EnergyGraph {
       ctx.fill();
     }
 
+    // ── 축을 끊은 자리 (물결선 두 줄) ──
+    if (view.split) drawAxisBreak(ctx, w, view.breakY, view.gapLabel);
+
     // ── 축 눈금 (MJ/kg, 경과 시간) ──
     ctx.fillStyle = 'rgba(90,122,160,0.75)';
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(fmtAxis(hi), PAD_X, 1);
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(fmtAxis(lo), PAD_X, h - 1);
+    for (const l of view.labels) {
+      ctx.textBaseline = l.baseline;
+      ctx.fillText(l.text, PAD_X, l.y);
+    }
     ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
     ctx.fillText(fmtTime(t1), w - PAD_X, h - 1);
 
     this.#setLegend(now);
+  }
+
+  /**
+   * y 축을 정합니다 — 곡선이 축을 넉넉히 쓰면 평범한 단일 축, 두 곡선이 양 끝에
+   * 눌어붙어 있으면 **가운데 빈 구간을 끊은 축**입니다.
+   *
+   * 끊어도 정직한 이유: 잘라내는 구간은 U′ 의 최고점과 K 의 최저점 사이라 **어떤
+   * 곡선도 지나지 않는 곳**입니다. 두 밴드 안에서는 배율이 일정하므로 곡선의 모양이
+   * 왜곡되지 않고, 두 밴드의 높이도 정확히 같아서(K = E′ − U′) 두 곡선은 서로의
+   * 거울상 그대로 남습니다. 끊었다는 사실은 물결선으로 표시합니다.
+   */
+  #axisView(pts, pad, plotH) {
+    const span = this.#span;
+    // 각 곡선이 훑는 구간: 발사 순간의 궤도(해석값) ∪ 실제로 찍힌 표본(안전망)
+    let uLo = span ? span.u.lo : Infinity;
+    let uHi = span ? span.u.hi : -Infinity;
+    let kLo = span ? span.k.lo : Infinity;
+    let kHi = span ? span.k.hi : -Infinity;
+    for (const p of pts) {
+      const u = p.u + U_LAUNCH_REF;
+      const e = p.e + U_LAUNCH_REF;
+      uLo = Math.min(uLo, u);
+      uHi = Math.max(uHi, u);
+      // E′ 는 언제나 K 구간 안입니다 (K = E′ − U′, U′ 는 발사 지점에서 0)
+      kLo = Math.min(kLo, p.k, e);
+      kHi = Math.max(kHi, p.k, e);
+    }
+
+    const swing = Math.max(uHi - uLo, kHi - kLo);
+    const full = kHi - uLo;
+    const eVal = span ? span.e : kHi;
+    const split = swing < full * SPLIT_SWING_MIN
+      && swing > Math.abs(eVal) * SPLIT_NOISE_FLOOR
+      && kLo > uHi;
+
+    if (!split) {
+      let lo = uLo;
+      let hi = kHi;
+      // 탈출선은 축을 크게 늘리지 않고 들어올 때만 — "얼마나 모자란가"를 보여 주되,
+      // 아직 한참 먼 발사에서 곡선을 절반으로 눌러 버리지는 않습니다
+      const showEscape = U_LAUNCH_REF <= hi * ESCAPE_LINE_HEADROOM;
+      if (showEscape) hi = Math.max(hi, U_LAUNCH_REF);
+      const margin = (hi - lo) * 0.06 || 1;
+      // 발사 지점보다 살짝 아래(착탄은 에베레스트 높이만큼 낮습니다)로 내려가는 정도는
+      // 0 에 맞춰 둡니다 — 눈금에 '-0.0' 이 뜨는 게 더 헷갈립니다
+      lo = lo < -margin ? lo - margin : 0;
+      hi += margin;
+      const fmt = fmtAxisFor(hi - lo);
+      return {
+        split: false,
+        lo,
+        hi,
+        showEscape,
+        Y: (v) => pad + ((hi - v) / (hi - lo)) * plotH,
+        labels: [
+          { text: fmt(hi), y: 1, baseline: 'top' },
+          { text: fmt(lo), y: this.#h - 1, baseline: 'bottom' },
+        ],
+      };
+    }
+
+    // 두 밴드를 같은 높이·같은 배율로 잡습니다 (거울상이 정확히 유지되도록).
+    // 여백을 넉넉히 두는 이유: E′ 는 K 의 최솟값과 같아서(가장 높은 곳 = 발사 지점에서
+    // U′ = 0) K 밴드의 바닥에 붙습니다. 여백이 없으면 그 선이 물결선에 닿습니다.
+    const half = swing / 2 + swing * 0.18;
+    const uB = { lo: (uLo + uHi) / 2 - half, hi: (uLo + uHi) / 2 + half };
+    const kB = { lo: (kLo + kHi) / 2 - half, hi: (kLo + kHi) / 2 + half };
+
+    const bandH = (plotH * (1 - SPLIT_GAP_FRAC)) / 2;
+    const gapH = plotH * SPLIT_GAP_FRAC;
+    const yKBot = pad + bandH;      // 위 밴드(K·E)의 아래 끝
+    const yUTop = yKBot + gapH;     // 아래 밴드(U′)의 위 끝
+    const fmt = fmtAxisFor(2 * half);
+
+    return {
+      split: true,
+      lo: uB.lo,
+      hi: kB.hi,
+      showEscape: false, // 축을 끊을 만큼 느린 발사는 탈출선과 한참 멉니다
+      bands: { u: uB, k: kB },
+      breakY: [yKBot, yUTop],
+      Y: (v) => {
+        if (v >= kB.lo) return pad + ((kB.hi - v) / (2 * half)) * bandH;
+        if (v <= uB.hi) return yUTop + ((uB.hi - v) / (2 * half)) * bandH;
+        // 빈 구간 — 곡선은 지나지 않지만, 눈금선이 들어와도 순서가 뒤집히지 않게
+        return yKBot + ((kB.lo - v) / (kB.lo - uB.hi)) * gapH;
+      },
+      gapLabel: `${toMJ(kB.lo - uB.hi).toFixed(1)} 생략`,
+      labels: [
+        { text: fmt(kB.hi), y: 1, baseline: 'top' },
+        { text: fmt(uB.lo), y: this.#h - 1, baseline: 'bottom' },
+      ],
+    };
   }
 
   /** 범례도 그래프와 같은 기준(발사 지점 = 0)으로 씁니다 */
@@ -231,4 +342,39 @@ export class EnergyGraph {
     set(els.energyU?.(), now === null ? null : now.u + U_LAUNCH_REF);
     set(els.energyE?.(), now === null ? null : now.e + U_LAUNCH_REF);
   }
+}
+
+/**
+ * 축을 끊은 자리 — 과학 그래프의 표준 표기인 물결선 두 줄로 그립니다.
+ *
+ * 사이를 배경색으로 덮지 않는 이유: 이 구간에는 애초에 지나가는 곡선이 없습니다.
+ * 끊긴 사실만 알려 주면 되고, 지워야 할 것은 없습니다.
+ */
+function drawAxisBreak(ctx, w, [yTop, yBot], label) {
+  const mid = (yTop + yBot) / 2;
+  const amp = Math.max(1, Math.min(1.8, (yBot - yTop) / 7));
+
+  ctx.save();
+  ctx.font = '9px "Space Mono",monospace';
+  // 글자 자리를 먼저 재서, 물결선이 그 앞에서 끝나게 합니다 (겹쳐 쓰면 둘 다 안 읽힙니다)
+  const textW = ctx.measureText(label).width;
+  const xEnd = w - PAD_X - textW - 5;
+
+  ctx.strokeStyle = 'rgba(120,160,210,0.4)';
+  ctx.lineWidth = 1;
+  for (const base of [mid - amp * 1.7, mid + amp * 1.7]) {
+    ctx.beginPath();
+    for (let x = PAD_X; x <= xEnd; x += 2) {
+      const y = base + Math.sin(x / 3.2) * amp;
+      if (x === PAD_X) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = 'rgba(120,160,210,0.7)';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, w - PAD_X, mid);
+  ctx.restore();
 }
