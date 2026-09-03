@@ -253,7 +253,9 @@ check('E 부호 판정은 기준을 옮겨도 같음', (circ.e + U_LAUNCH_REF) <
 app.reset();
 app.config.initSpeed = 9000; app.config.angleDeg = 0; app.config.timeScale = 32;
 app.launch();
-run(300);
+run(2);
+const axisEarly = { ...app.energy.axis };
+run(298);
 const ep = app.energy.points;
 check('그래프 표본 수집', ep.length > 20, `${ep.length}점`);
 check('표본 수 상한 유지', ep.length <= 240, `${ep.length}점`);
@@ -261,6 +263,34 @@ const eArr = ep.map((q) => q.e);
 const drift = (Math.max(...eArr) - Math.min(...eArr)) / Math.abs(eArr[0]);
 check('역학적 에너지 보존 (드리프트 < 0.1%)', drift < 1e-3, `${(drift * 100).toExponential(1)}%`);
 check('K + U = E', ep.every((q) => Math.abs(q.k + q.u - q.e) < 1));
+
+// 눈금: 쌓인 표본이 아니라 발사 순간의 궤도가 정합니다 (energySpan)
+const { energySpan } = await import('../src/physics/energy.js');
+const span9 = energySpan({ x: 0, y: 6.371e6 + 8848 }, { x: 9000, y: 0 });
+check('축 = [0, E′] — 발사 에너지가 곧 눈금 전체',
+  Math.abs(span9.lo) < 2e5 && Math.abs(span9.hi - span9.e) / span9.e < 1e-3,
+  `${(span9.lo / 1e6).toFixed(2)} ~ ${(span9.hi / 1e6).toFixed(1)} MJ/kg`);
+
+const axisLate = app.energy.axis;
+check('눈금이 비행 내내 고정 (첫 프레임 = 마지막 프레임)',
+  Math.abs(axisEarly.hi - axisLate.hi) / axisLate.hi < 1e-6
+  && Math.abs(axisEarly.lo - axisLate.lo) < 1,
+  `${(axisEarly.hi / 1e6).toFixed(2)} → ${(axisLate.hi / 1e6).toFixed(2)} MJ/kg`);
+
+// 곡선이 실제로 축을 얼마나 쓰는가 — 탈출선 때문에 눌리지 않아야 합니다
+const vals = ep.flatMap((q) => [q.k, q.u + U_LAUNCH_REF, q.e + U_LAUNCH_REF]);
+const used = (Math.max(...vals) - Math.min(...vals)) / (axisLate.hi - axisLate.lo);
+check('곡선이 축의 85% 이상 사용', used > 0.85, `${(used * 100).toFixed(0)}%`);
+check('9 km/s 는 탈출과 멀어 탈출선 없음', !axisLate.showEscape);
+
+// 탈출에 가까운 발사에서는 탈출선이 다시 등장합니다
+app.reset();
+app.config.initSpeed = 11000; app.launch();
+run(30);
+check('11 km/s 에서는 탈출선 표시', app.energy.axis.showEscape);
+check('탈출선을 넣어도 축은 탈출 에너지 + 여백뿐',
+  app.energy.axis.hi < U_LAUNCH_REF * 1.12, `${(app.energy.axis.hi / 1e6).toFixed(1)} MJ/kg`);
+
 app.reset();
 check('리셋하면 그래프도 비워짐', app.energy.points.length === 0);
 
