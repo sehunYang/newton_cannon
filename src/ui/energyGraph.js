@@ -1,5 +1,5 @@
 import { specificEnergy, energySpan, U_LAUNCH_REF } from '../physics/energy.js';
-import { fmtTime } from '../core/format.js';
+import { niceStep, niceTicks } from '../core/format.js';
 import { els } from './dom.js';
 
 /**
@@ -33,6 +33,12 @@ import { els } from './dom.js';
  * 수평선으로 보입니다. 그런데 그 축의 99% 는 **U′ 띠와 K 띠 사이의 빈 구간**이라,
  * 거기를 끊어내면 같은 물리가 100 배로 확대됩니다 (`#axisView` 참고).
  *
+ * **축은 x·y 모두 선을 긋고 눈금을 답니다.** 좁은 패널이라 두 가지를 아낍니다 —
+ * 시간 축은 전체를 한 단위(s / min / hr)로 통일해 눈금에는 숫자만 적고 단위는 오른쪽
+ * 끝에 한 번만, 세로 단위(MJ/kg)는 패널 제목이 이미 말하고 있으므로 생략합니다.
+ * 왼쪽 여백만 상수가 아닌 이유는 축을 끊으면 '24.50' 처럼 자릿수가 늘기 때문입니다 —
+ * 그때그때 가장 넓은 눈금 글자를 재서 정합니다.
+ *
  * 캔버스는 시뮬레이션 캔버스와 별개인 작은 DOM 캔버스입니다. `.ui` 의 자식이라
  * earthLocator 의 창이 알아서 이 패널을 피해 갑니다.
  */
@@ -65,21 +71,49 @@ const SPLIT_GAP_FRAC = 0.16;
  * (상대 1e-6)를 물리인 양 크게 그려 버립니다. 수평 발사의 0.33% 는 이 문턱 위입니다.
  */
 const SPLIT_NOISE_FLOOR = 5e-4;
-/** 좌우 여백은 고정, 위아래는 캔버스가 낮을수록 줄입니다(작은 폰에서 곡선이 눌리지 않게) */
-const PAD_X = 8;
-const padY = (h) => Math.max(9, Math.min(14, h * 0.14));
+/**
+ * 축 여백 — 눈금 글자가 들어갈 자리.
+ * 왼쪽만 상수가 아닌 이유: 축을 끊으면 '24.50' 처럼 자릿수가 늘어나므로,
+ * 그때그때 가장 넓은 라벨을 재서 정합니다.
+ */
+const AXIS = { top: 6, right: 6, tick: 3, gap: 3 };
+/** 아래 여백(시간 눈금 자리) — 캔버스가 낮으면 함께 줄입니다 */
+const axisBottom = (h) => Math.max(11, Math.min(15, h * 0.15));
+const AXIS_FONT = '9px "Space Mono",monospace';
+const AXIS_INK = 'rgba(120,160,210,0.45)';
+const AXIS_TEXT = 'rgba(90,122,160,0.85)';
+const GRID_INK = 'rgba(120,160,210,0.12)';
 
 const toMJ = (v) => v / 1e6;
 const fmtMJ = (v) => `${toMJ(v).toFixed(1)}`;
 /**
- * 축 눈금 표기법을 **그 축이 담는 범위**에 맞춰 고릅니다.
- * 값의 크기로 정하면 안 됩니다 — 축을 끊어 24.50~24.59 를 보여줄 때 정수로 반올림하면
+ * 눈금 표기법을 **눈금 간격**에 맞춰 고릅니다.
+ * 값의 크기로 정하면 안 됩니다 — 축을 끊어 24.50~24.60 을 보여줄 때 정수로 반올림하면
  * '24, 25' 가 되어 확대한 의미가 사라집니다.
  */
-function fmtAxisFor(range) {
-  const r = toMJ(Math.max(range, 1e-9));
-  const dec = r >= 10 ? 0 : r >= 1 ? 1 : r >= 0.1 ? 2 : 3;
-  return (v) => (v === 0 ? '0' : toMJ(v).toFixed(dec));
+function fmtForStep(step) {
+  const s = toMJ(Math.max(step, 1e-9));
+  const dec = s >= 1 ? 0 : s >= 0.1 ? 1 : s >= 0.01 ? 2 : 3;
+  return (v) => toMJ(v).toFixed(dec);
+}
+
+/**
+ * 시간 축 눈금. 축 전체를 **한 단위**로 통일하고 눈금에는 숫자만 적습니다
+ * (단위는 축 오른쪽 끝에 한 번). 눈금마다 's / min / hr' 을 붙이면 좁은 패널에서
+ * 글자가 서로 부딪힙니다.
+ */
+function timeTicks(t0, t1, maxCount) {
+  const span = t1 - t0;
+  const { div, unit } = span < 180 ? { div: 1, unit: 's' }
+    : span < 10800 ? { div: 60, unit: 'min' }
+    : span < 259200 ? { div: 3600, unit: 'hr' }
+    : { div: 86400, unit: 'day' };
+  const step = niceStep(span / div / Math.max(1, maxCount)) * div;
+  const values = [];
+  for (let i = Math.ceil(t0 / step); i * step <= t1; i++) values.push(i * step);
+  const d = step / div;
+  const dec = d >= 1 ? 0 : d >= 0.1 ? 1 : 2;
+  return { unit, values, text: (v) => (v / div).toFixed(dec) };
 }
 
 export class EnergyGraph {
@@ -162,42 +196,100 @@ export class EnergyGraph {
 
     const t0 = pts[0].t;
     const t1 = Math.max(pts[pts.length - 1].t, t0 + 1e-6);
-    const pad = padY(h);
-    const plotW = w - PAD_X * 2;
-    const plotH = h - pad * 2;
-    const X = (t) => PAD_X + ((t - t0) / (t1 - t0)) * plotW;
 
-    const view = this.#axisView(pts, pad, plotH);
-    const { Y, showEscape } = view;
+    const view = this.#axisView(pts, ctx);
+    const { Y, plot, showEscape } = view;
+    const X = (t) => plot.x0 + ((t - t0) / (t1 - t0)) * (plot.x1 - plot.x0);
+    const xTicks = timeTicks(t0, t1, Math.max(2, Math.round((plot.x1 - plot.x0) / 46)));
     this.axis = {
-      lo: view.lo, hi: view.hi, showEscape, split: view.split, bands: view.bands ?? null,
+      lo: view.lo,
+      hi: view.hi,
+      showEscape,
+      split: view.split,
+      bands: view.bands ?? null,
+      plot,
+      yTicks: view.yTicks.map((t) => t.v),
+      xTicks: xTicks.values,
+      timeUnit: xTicks.unit,
     };
 
-    // ── 기준선 ──
-    ctx.font = '9px "Space Mono",monospace';
+    ctx.font = AXIS_FONT;
     ctx.lineWidth = 1;
+
+    // ── 눈금선 (아주 흐리게 — 값을 읽는 보조선일 뿐 곡선을 가리면 안 됩니다) ──
+    ctx.strokeStyle = GRID_INK;
+    ctx.beginPath();
+    for (const t of view.yTicks) {
+      ctx.moveTo(plot.x0, t.y);
+      ctx.lineTo(plot.x1, t.y);
+    }
+    for (const v of xTicks.values) {
+      ctx.moveTo(X(v), plot.y0);
+      ctx.lineTo(X(v), plot.y1);
+    }
+    ctx.stroke();
+
+    // ── 축선 + 눈금 표시 ──
+    ctx.strokeStyle = AXIS_INK;
+    ctx.beginPath();
+    ctx.moveTo(plot.x0, plot.y0);
+    ctx.lineTo(plot.x0, plot.y1);   // y 축
+    ctx.lineTo(plot.x1, plot.y1);   // x 축
+    for (const t of view.yTicks) {
+      ctx.moveTo(plot.x0 - AXIS.tick, t.y);
+      ctx.lineTo(plot.x0, t.y);
+    }
+    for (const v of xTicks.values) {
+      ctx.moveTo(X(v), plot.y1);
+      ctx.lineTo(X(v), plot.y1 + AXIS.tick);
+    }
+    ctx.stroke();
+
+    // ── 눈금 숫자 ──
+    ctx.fillStyle = AXIS_TEXT;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (const t of view.yTicks) ctx.fillText(t.text, plot.x0 - AXIS.tick - AXIS.gap, t.y);
+
+    ctx.textBaseline = 'top';
+    // 단위는 축 오른쪽 끝에 한 번만. 거기 겹치는 눈금 숫자는 생략합니다
+    const unitW = ctx.measureText(xTicks.unit).width;
+    ctx.textAlign = 'right';
+    ctx.fillText(xTicks.unit, plot.x1, plot.y1 + AXIS.tick + 1);
+    ctx.textAlign = 'center';
+    for (const v of xTicks.values) {
+      const x = X(v);
+      if (x + ctx.measureText(xTicks.text(v)).width / 2 > plot.x1 - unitW - 4) continue;
+      ctx.fillText(xTicks.text(v), x, plot.y1 + AXIS.tick + 1);
+    }
+
+    // ── 기준선 ──
     ctx.setLineDash([3, 3]);
 
-    // 0 = 발사 지점에 정지해 있는 상태
+    // 0 = 발사 지점에 정지해 있는 상태.
+    // x 축과 겹칠 때는 생략합니다 — 점선이 축선 위에 덧그려지면 축이 끊어져 보입니다
+    // (축의 밑변이 곧 0 인 경우라, 선을 하나 더 그어 봐야 알려 주는 것도 없습니다).
     const y0 = Y(0);
-    ctx.strokeStyle = 'rgba(120,160,210,0.3)';
-    ctx.beginPath();
-    ctx.moveTo(PAD_X, y0);
-    ctx.lineTo(w - PAD_X, y0);
-    ctx.stroke();
+    if (Math.abs(y0 - plot.y1) > 2) {
+      ctx.strokeStyle = 'rgba(120,160,210,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(plot.x0, y0);
+      ctx.lineTo(plot.x1, y0);
+      ctx.stroke();
+    }
 
     // 탈출선: 역학적 에너지가 이 위로 올라가면 돌아오지 않습니다 (무한대 기준의 E = 0)
     if (showEscape) {
       const yEsc = Y(U_LAUNCH_REF);
       ctx.strokeStyle = 'rgba(126,240,200,0.4)';
       ctx.beginPath();
-      ctx.moveTo(PAD_X, yEsc);
-      ctx.lineTo(w - PAD_X, yEsc);
+      ctx.moveTo(plot.x0, yEsc);
+      ctx.lineTo(plot.x1, yEsc);
       ctx.stroke();
       ctx.fillStyle = 'rgba(126,240,200,0.75)';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('탈출', w - PAD_X, yEsc - 1);
+      ctx.fillText('탈출', plot.x1, yEsc - 1);
     }
     ctx.setLineDash([]);
 
@@ -226,18 +318,7 @@ export class EnergyGraph {
     }
 
     // ── 축을 끊은 자리 (물결선 두 줄) ──
-    if (view.split) drawAxisBreak(ctx, w, view.breakY, view.gapLabel);
-
-    // ── 축 눈금 (MJ/kg, 경과 시간) ──
-    ctx.fillStyle = 'rgba(90,122,160,0.75)';
-    ctx.textAlign = 'left';
-    for (const l of view.labels) {
-      ctx.textBaseline = l.baseline;
-      ctx.fillText(l.text, PAD_X, l.y);
-    }
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(fmtTime(t1), w - PAD_X, h - 1);
+    if (view.split) drawAxisBreak(ctx, plot, view.breakY, view.gapLabel);
 
     this.#setLegend(now);
   }
@@ -251,7 +332,14 @@ export class EnergyGraph {
    * 왜곡되지 않고, 두 밴드의 높이도 정확히 같아서(K = E′ − U′) 두 곡선은 서로의
    * 거울상 그대로 남습니다. 끊었다는 사실은 물결선으로 표시합니다.
    */
-  #axisView(pts, pad, plotH) {
+  #axisView(pts, ctx) {
+    const w = this.#w;
+    const h = this.#h;
+    // 세로 여백은 라벨 폭과 무관하므로 먼저 확정됩니다 → 눈금 개수를 여기서 정할 수 있습니다
+    const y0 = AXIS.top;
+    const y1 = h - axisBottom(h);
+    const plotH = Math.max(10, y1 - y0);
+
     const span = this.#span;
     // 각 곡선이 훑는 구간: 발사 순간의 궤도(해석값) ∪ 실제로 찍힌 표본(안전망)
     let uLo = span ? span.u.lo : Infinity;
@@ -275,32 +363,56 @@ export class EnergyGraph {
       && swing > Math.abs(eVal) * SPLIT_NOISE_FLOOR
       && kLo > uHi;
 
-    if (!split) {
-      let lo = uLo;
-      let hi = kHi;
-      // 탈출선은 축을 크게 늘리지 않고 들어올 때만 — "얼마나 모자란가"를 보여 주되,
-      // 아직 한참 먼 발사에서 곡선을 절반으로 눌러 버리지는 않습니다
-      const showEscape = U_LAUNCH_REF <= hi * ESCAPE_LINE_HEADROOM;
-      if (showEscape) hi = Math.max(hi, U_LAUNCH_REF);
-      const margin = (hi - lo) * 0.06 || 1;
-      // 발사 지점보다 살짝 아래(착탄은 에베레스트 높이만큼 낮습니다)로 내려가는 정도는
-      // 0 에 맞춰 둡니다 — 눈금에 '-0.0' 이 뜨는 게 더 헷갈립니다
-      lo = lo < -margin ? lo - margin : 0;
-      hi += margin;
-      const fmt = fmtAxisFor(hi - lo);
-      return {
-        split: false,
-        lo,
-        hi,
-        showEscape,
-        Y: (v) => pad + ((hi - v) / (hi - lo)) * plotH,
-        labels: [
-          { text: fmt(hi), y: 1, baseline: 'top' },
-          { text: fmt(lo), y: this.#h - 1, baseline: 'bottom' },
-        ],
-      };
-    }
+    const out = split
+      ? this.#splitAxis({ uLo, uHi, kLo, kHi, swing }, y0, plotH)
+      : this.#plainAxis({ uLo, kHi }, y0, plotH);
 
+    // 좌 여백은 가장 넓은 눈금 숫자가 정합니다 ('40' 과 '24.50' 은 두 배 차이)
+    ctx.font = AXIS_FONT;
+    let labelW = 0;
+    for (const t of out.yTicks) labelW = Math.max(labelW, ctx.measureText(t.text).width);
+    const x0 = Math.ceil(labelW) + AXIS.tick + AXIS.gap;
+
+    out.plot = { x0, x1: Math.max(x0 + 10, w - AXIS.right), y0, y1 };
+    for (const t of out.yTicks) t.y = out.Y(t.v);
+    return out;
+  }
+
+  /** 평범한 단일 축 — 곡선이 축을 넉넉히 쓰는 발사 */
+  #plainAxis({ uLo, kHi }, top, plotH) {
+    let lo = uLo;
+    let hi = kHi;
+    // 탈출선은 축을 크게 늘리지 않고 들어올 때만 — "얼마나 모자란가"를 보여 주되,
+    // 아직 한참 먼 발사에서 곡선을 절반으로 눌러 버리지는 않습니다
+    const showEscape = U_LAUNCH_REF <= hi * ESCAPE_LINE_HEADROOM;
+    if (showEscape) hi = Math.max(hi, U_LAUNCH_REF);
+    const margin = (hi - lo) * 0.06 || 1;
+    // 발사 지점보다 살짝 아래(착탄은 에베레스트 높이만큼 낮습니다)로 내려가는 정도는
+    // 0 에 맞춰 둡니다 — 눈금에 '-0.0' 이 뜨는 게 더 헷갈립니다
+    lo = lo < -margin ? lo - margin : 0;
+    hi += margin;
+
+    const { step, values } = niceTicks(lo, hi, Math.max(2, Math.round(plotH / 17)));
+    const fmt = fmtForStep(step);
+    return {
+      split: false,
+      lo,
+      hi,
+      showEscape,
+      Y: (v) => top + ((hi - v) / (hi - lo)) * plotH,
+      yTicks: values.map((v) => ({ v, text: fmt(v) })),
+    };
+  }
+
+  /**
+   * 빈 구간을 끊은 축 — 두 곡선이 축의 양 끝에 눌어붙어 있을 때.
+   *
+   * 끊어도 정직한 이유: 잘라내는 구간은 U′ 의 최고점과 K 의 최저점 사이라 **어떤
+   * 곡선도 지나지 않는 곳**입니다. 두 밴드 안에서는 배율이 일정하므로 곡선의 모양이
+   * 왜곡되지 않고, 두 밴드의 높이도 정확히 같아서(K = E′ − U′) 두 곡선은 서로의
+   * 거울상 그대로 남습니다. 끊었다는 사실은 물결선으로 표시합니다.
+   */
+  #splitAxis({ uLo, uHi, kLo, kHi, swing }, top, plotH) {
     // 두 밴드를 같은 높이·같은 배율로 잡습니다 (거울상이 정확히 유지되도록).
     // 여백을 넉넉히 두는 이유: E′ 는 K 의 최솟값과 같아서(가장 높은 곳 = 발사 지점에서
     // U′ = 0) K 밴드의 바닥에 붙습니다. 여백이 없으면 그 선이 물결선에 닿습니다.
@@ -310,9 +422,21 @@ export class EnergyGraph {
 
     const bandH = (plotH * (1 - SPLIT_GAP_FRAC)) / 2;
     const gapH = plotH * SPLIT_GAP_FRAC;
-    const yKBot = pad + bandH;      // 위 밴드(K·E)의 아래 끝
+    const yKBot = top + bandH;      // 위 밴드(K·E)의 아래 끝
     const yUTop = yKBot + gapH;     // 아래 밴드(U′)의 위 끝
-    const fmt = fmtAxisFor(2 * half);
+
+    // 눈금은 밴드마다 따로 — 두 밴드의 배율이 같으므로 간격도 같게 나옵니다
+    const perBand = Math.max(2, Math.round(bandH / 18));
+    const kT = niceTicks(kB.lo, kB.hi, perBand);
+    const uT = niceTicks(uB.lo, uB.hi, perBand);
+    const fmt = fmtForStep(Math.min(kT.step, uT.step));
+
+    const Y = (v) => {
+      if (v >= kB.lo) return top + ((kB.hi - v) / (2 * half)) * bandH;
+      if (v <= uB.hi) return yUTop + ((uB.hi - v) / (2 * half)) * bandH;
+      // 빈 구간 — 곡선은 지나지 않지만, 눈금선이 들어와도 순서가 뒤집히지 않게
+      return yKBot + ((kB.lo - v) / (kB.lo - uB.hi)) * gapH;
+    };
 
     return {
       split: true,
@@ -321,17 +445,9 @@ export class EnergyGraph {
       showEscape: false, // 축을 끊을 만큼 느린 발사는 탈출선과 한참 멉니다
       bands: { u: uB, k: kB },
       breakY: [yKBot, yUTop],
-      Y: (v) => {
-        if (v >= kB.lo) return pad + ((kB.hi - v) / (2 * half)) * bandH;
-        if (v <= uB.hi) return yUTop + ((uB.hi - v) / (2 * half)) * bandH;
-        // 빈 구간 — 곡선은 지나지 않지만, 눈금선이 들어와도 순서가 뒤집히지 않게
-        return yKBot + ((kB.lo - v) / (kB.lo - uB.hi)) * gapH;
-      },
       gapLabel: `${toMJ(kB.lo - uB.hi).toFixed(1)} 생략`,
-      labels: [
-        { text: fmt(kB.hi), y: 1, baseline: 'top' },
-        { text: fmt(uB.lo), y: this.#h - 1, baseline: 'bottom' },
-      ],
+      Y,
+      yTicks: [...kT.values, ...uT.values].map((v) => ({ v, text: fmt(v) })),
     };
   }
 
@@ -350,7 +466,7 @@ export class EnergyGraph {
  * 사이를 배경색으로 덮지 않는 이유: 이 구간에는 애초에 지나가는 곡선이 없습니다.
  * 끊긴 사실만 알려 주면 되고, 지워야 할 것은 없습니다.
  */
-function drawAxisBreak(ctx, w, [yTop, yBot], label) {
+function drawAxisBreak(ctx, plot, [yTop, yBot], label) {
   const mid = (yTop + yBot) / 2;
   const amp = Math.max(1, Math.min(1.8, (yBot - yTop) / 7));
 
@@ -358,15 +474,15 @@ function drawAxisBreak(ctx, w, [yTop, yBot], label) {
   ctx.font = '9px "Space Mono",monospace';
   // 글자 자리를 먼저 재서, 물결선이 그 앞에서 끝나게 합니다 (겹쳐 쓰면 둘 다 안 읽힙니다)
   const textW = ctx.measureText(label).width;
-  const xEnd = w - PAD_X - textW - 5;
+  const xEnd = plot.x1 - textW - 5;
 
   ctx.strokeStyle = 'rgba(120,160,210,0.4)';
   ctx.lineWidth = 1;
   for (const base of [mid - amp * 1.7, mid + amp * 1.7]) {
     ctx.beginPath();
-    for (let x = PAD_X; x <= xEnd; x += 2) {
+    for (let x = plot.x0; x <= xEnd; x += 2) {
       const y = base + Math.sin(x / 3.2) * amp;
-      if (x === PAD_X) ctx.moveTo(x, y);
+      if (x === plot.x0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
@@ -375,6 +491,6 @@ function drawAxisBreak(ctx, w, [yTop, yBot], label) {
   ctx.fillStyle = 'rgba(120,160,210,0.7)';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, w - PAD_X, mid);
+  ctx.fillText(label, plot.x1, mid);
   ctx.restore();
 }

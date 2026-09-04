@@ -1,5 +1,9 @@
 import { R_EARTH } from '../core/constants.js';
 
+// 눈금 간격 고르기는 에너지 그래프도 쓰므로 core/format.js 로 옮겼습니다.
+// 지표면 레이어들이 계속 여기서 가져다 쓸 수 있게 다시 내보냅니다.
+export { niceStep } from '../core/format.js';
+
 /**
  * 지표면 모드 레이어들이 공유하는 기하 헬퍼.
  *
@@ -61,18 +65,6 @@ export function groundPolyline(vp, { step = 8, margin = 40 } = {}) {
   }
   pts.push({ x: vp.width + margin, y: groundYAt(vp, vp.width + margin) });
   return pts;
-}
-
-/**
- * 사람이 읽기 좋은 눈금 간격을 고릅니다 (1·2·5 × 10ⁿ).
- * @param {number} rough 원하는 대략적 간격
- */
-export function niceStep(rough) {
-  const exp = Math.floor(Math.log10(rough));
-  const base = 10 ** exp;
-  const n = rough / base;
-  const mult = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
-  return mult * base;
 }
 
 /** 거리(m) 짧은 라벨 — 눈금용이라 소수점을 아낍니다 */

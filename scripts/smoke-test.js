@@ -331,6 +331,35 @@ const circ2 = app.energy.points.map((q) => q.k);
 check('원궤도에서 K 는 사실상 일정', (Math.max(...circ2) - Math.min(...circ2)) < 1e4,
   `${((Math.max(...circ2) - Math.min(...circ2)) / 1e6).toFixed(5)} MJ/kg`);
 
+// ── 축선과 눈금 ──
+app.reset();
+app.config.initSpeed = 3200; app.config.angleDeg = 45; app.config.timeScale = 32;
+app.launch();
+run(300);
+const ax = app.energy.axis;
+check('y 눈금이 만들어짐', ax.yTicks.length >= 2, `${ax.yTicks.length}개`);
+check('x(시간) 눈금이 만들어짐', ax.xTicks.length >= 2, `${ax.xTicks.length}개`);
+check('눈금이 축 범위 안에', ax.yTicks.every((v) => v >= ax.lo - 1 && v <= ax.hi + 1));
+check('눈금 간격이 일정 (1·2·5 × 10ⁿ)',
+  ax.yTicks.length < 3 || Math.abs((ax.yTicks[1] - ax.yTicks[0]) - (ax.yTicks[2] - ax.yTicks[1])) < 1);
+check('축 라벨 자리를 왼쪽·아래에 비워 둠',
+  ax.plot.x0 > 0 && ax.plot.y1 < app.energy.canvas.clientHeight,
+  `좌 ${ax.plot.x0.toFixed(0)}px`);
+check('시간 단위를 축 하나에 통일', typeof ax.timeUnit === 'string' && ax.timeUnit.length > 0,
+  ax.timeUnit);
+
+// 끊은 축에서는 두 밴드 각각에 눈금이 있어야 읽을 수 있습니다
+app.reset();
+app.config.initSpeed = 7000; app.config.angleDeg = 0; app.config.timeScale = 128;
+app.launch();
+run(200);
+const sax = app.energy.axis;
+check('끊은 축은 두 밴드 모두에 눈금',
+  sax.yTicks.some((v) => v <= sax.bands.u.hi) && sax.yTicks.some((v) => v >= sax.bands.k.lo),
+  `${sax.yTicks.length}개`);
+check('빈 구간에는 눈금을 두지 않음',
+  !sax.yTicks.some((v) => v > sax.bands.u.hi && v < sax.bands.k.lo));
+
 app.reset();
 check('리셋하면 그래프도 비워짐', app.energy.points.length === 0);
 
